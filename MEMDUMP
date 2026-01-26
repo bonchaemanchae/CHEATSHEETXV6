@@ -1,0 +1,218 @@
+MOD 1 — CHANGE RETURN VALUE + KERNEL PRINT MESSAGE
+-----------------------------------------------------
+
+QUESTION:
+Modify hello() so that it:
+1) prints "Hello from kernel syscall!"
+2) returns 1012
+
+FILES TO EDIT:
+- kernel/sysproc.c   (sys_hello)
+(NO other file needed if syscall already exists)
+
+ANSWER (kernel/sysproc.c):
+-----------------------------------------------------
+uint64
+sys_hello(void)
+{
+  printf("Hello from kernel syscall!\n");
+  return 1012;
+}
+-----------------------------------------------------
+
+user/hello.c can stay as:
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = hello();
+  printf("hello returned %d\n", r);
+  exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 2 — ADD A SECOND SYSCALL: goodbye()
+-----------------------------------------------------
+
+QUESTION:
+Add a new syscall goodbye() that:
+- prints "Goodbye from kernel syscall!"
+- returns 0
+Write user program goodbye that prints:
+  goodbye returned <value>
+
+FILES TO EDIT / ADD:
+Kernel:
+- kernel/syscall.h
+- kernel/syscall.c
+- kernel/sysproc.c
+(+ kernel/defs.h if your tree requires prototypes)
+User:
+- user/user.h
+- user/usys.pl
+- user/goodbye.c (new)
+- Makefile (add _goodbye)
+
+ANSWER STEPS + SNIPPETS:
+
+(1) kernel/syscall.h
+Add a new syscall number:
+-----------------------------------------------------
+#define SYS_goodbye  <next_available_number>
+-----------------------------------------------------
+
+(2) kernel/sysproc.c
+Implement handler:
+-----------------------------------------------------
+uint64
+sys_goodbye(void)
+{
+  printf("Goodbye from kernel syscall!\n");
+  return 0;
+}
+-----------------------------------------------------
+
+(3) kernel/syscall.c
+Add extern declaration:
+-----------------------------------------------------
+extern uint64 sys_goodbye(void);
+-----------------------------------------------------
+
+Add to syscall table:
+-----------------------------------------------------
+[SYS_goodbye] sys_goodbye,
+-----------------------------------------------------
+
+(4) user/user.h
+Add prototype:
+-----------------------------------------------------
+int goodbye(void);
+-----------------------------------------------------
+
+(5) user/usys.pl
+Add entry:
+-----------------------------------------------------
+entry("goodbye");
+-----------------------------------------------------
+
+(6) user/goodbye.c (new file)
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = goodbye();
+  printf("goodbye returned %d\n", r);
+  exit(0);
+}
+-----------------------------------------------------
+
+(7) Makefile
+Add program to UPROGS list:
+-----------------------------------------------------
+_goodbye
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 3 — HELLO PRINTS PID TOO (ONLY IF ASKED)
+-----------------------------------------------------
+
+QUESTION:
+Modify hello() so that it prints:
+  Hello from kernel syscall! pid=<pid>
+and returns 0.
+
+FILES TO EDIT:
+- kernel/sysproc.c
+
+ANSWER (kernel/sysproc.c):
+NOTE: pid access depends on your tree. Common xv6 pattern:
+-----------------------------------------------------
+uint64
+sys_hello(void)
+{
+  printf("Hello from kernel syscall! pid=%d\n", myproc()->pid);
+  return 0;
+}
+-----------------------------------------------------
+
+If myproc() not in scope in that file, the tree will usually already
+have a way to get current process (the lab will not ask pid if not).
+
+-----------------------------------------------------
+MOD 4 — USER PROGRAM CHANGES ONLY (NO KERNEL EDITS)
+-----------------------------------------------------
+
+QUESTION:
+Modify user/hello.c so it:
+- calls hello()
+- prints "kernel said: <returnvalue>"
+
+FILES:
+- user/hello.c only
+
+ANSWER (user/hello.c):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = hello();
+  printf("kernel said: %d\n", r);
+  exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 5 — HELLO TAKES ONE ARGUMENT (ADVANCED, ONLY IF ASKED)
+-----------------------------------------------------
+
+QUESTION:
+Change hello to accept an int argument n from user program:
+  int hello(int n);
+Kernel prints n and returns n+1.
+
+FILES (changes syscall signature):
+User:
+- user/user.h
+- user/usys.pl (usually needs arg handling in xv6 calling convention)
+Kernel:
+- kernel/sysproc.c (use argint to read syscall arg)
+
+NOTE:
+This is MORE complex and only asked if your lab taught syscall args.
+
+KERNEL HANDLER SHAPE (kernel/sysproc.c):
+-----------------------------------------------------
+uint64
+sys_hello(void)
+{
+
+  int n;
+  if (argint(0, &n) < 0)
+    return -1;
+  printf("hello got %d\n", n);
+  return n + 1;
+}
+-----------------------------------------------------
+
+USER PROGRAM SHAPE:
+-----------------------------------------------------
+int n = atoi(argv[1]);
+int r = hello(n);
+printf("%d\n", r);
+-----------------------------------------------------
+
+(Only include this mod in cheatsheet if your lab covered syscall args.)
+
+-----------------------------------------------------
+END
+--------------------------------------------------

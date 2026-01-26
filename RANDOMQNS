@@ -1,6 +1,277 @@
 XV6 (User-space) Lab-Style Practice Set — Questions + Code Answers
 (ALL COPY-PASTEABLE. Each Q has a matching “Answer code”.)
 
+A FEW SIMPLE XV6 LAB-STYLE QNS + ANSWERS
+(find / grep / file read / 1-direction pipe / fork)
+
+============================================================
+Q1) SIMPLE FILE READ (cat1)
+Write cat1.c:
+- Usage: cat1 <file>
+- Open file, read chunks, write to stdout.
+- If open fails, print error to fd 2.
+
+ANSWER (user/cat1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 2){
+    fprintf(2, "usage: cat1 file\n");
+    exit(1);
+  }
+
+  int fd = open(argv[1], 0);
+  if(fd < 0){
+    fprintf(2, "cat1: cannot open %s\n", argv[1]);
+    exit(1);
+  }
+
+  char buf[256];
+  int n;
+  while((n = read(fd, buf, sizeof(buf))) > 0){
+    write(1, buf, n);
+  }
+
+  close(fd);
+  exit(0);
+}
+
+============================================================
+Q2) SIMPLE GREP (grep1)
+Write grep1.c:
+- Usage: grep1 <pattern> <file>
+- Print lines containing <pattern>
+- Keep matching simple: substring match (no regex).
+(Hint: read file, split by '\n', check contains)
+
+ANSWER (user/grep1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+static int
+contains(char *s, char *pat)
+{
+  int m = strlen(pat);
+  if(m == 0) return 1;
+  for(int i = 0; s[i]; i++){
+    int j = 0;
+    while(pat[j] && s[i+j] && s[i+j] == pat[j]) j++;
+    if(pat[j] == 0) return 1;
+  }
+  return 0;
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 3){
+    fprintf(2, "usage: grep1 pattern file\n");
+    exit(1);
+  }
+
+  char *pat = argv[1];
+  int fd = open(argv[2], 0);
+  if(fd < 0){
+    fprintf(2, "grep1: cannot open %s\n", argv[2]);
+    exit(1);
+  }
+
+  char buf[512];
+  int keep = 0;
+
+  int n;
+  while((n = read(fd, buf+keep, sizeof(buf)-keep-1)) > 0){
+    int total = keep + n;
+    buf[total] = 0;
+
+    int start = 0;
+    for(int i = 0; i < total; i++){
+      if(buf[i] == '\n'){
+        buf[i] = 0;
+        if(contains(buf+start, pat)){
+          printf("%s\n", buf+start);
+        }
+        start = i+1;
+      }
+    }
+
+    keep = total - start;
+    memmove(buf, buf+start, keep);
+  }
+
+  // last line (no trailing newline)
+  if(keep > 0){
+    buf[keep] = 0;
+    if(contains(buf, pat)) printf("%s\n", buf);
+  }
+
+  close(fd);
+  exit(0);
+}
+
+============================================================
+Q3) SIMPLE FIND (find1) — recursive by exact filename
+Write find1.c:
+- Usage: find1 <path> <name>
+- Recursively search from <path>
+- Print full path for any file whose basename == <name>
+
+ANSWER (user/find1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fs.h"
+
+static char*
+basename(char *path)
+{
+  char *p;
+  for(p = path + strlen(path); p >= path && *p != '/'; p--) ;
+  return p + 1;
+}
+
+static void
+find(char *path, char *target)
+{
+  int fd;
+  struct stat st;
+  struct dirent de;
+  char buf[512], *p;
+
+  fd = open(path, 0);
+  if(fd < 0) return;
+
+  if(fstat(fd, &st) < 0){
+    close(fd);
+    return;
+  }
+
+  if(st.type == T_FILE){
+    if(strcmp(basename(path), target) == 0)
+      printf("%s\n", path);
+    close(fd);
+    return;
+  }
+
+  if(st.type != T_DIR){
+    close(fd);
+    return;
+  }
+
+  if(strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)){
+    close(fd);
+    return;
+  }
+
+  strcpy(buf, path);
+  p = buf + strlen(buf);
+  *p++ = '/';
+
+  while(read(fd, &de, sizeof(de)) == sizeof(de)){
+    if(de.inum == 0) continue;
+    if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+
+    memmove(p, de.name, DIRSIZ);
+    p[DIRSIZ] = 0;
+
+    find(buf, target);
+  }
+
+  close(fd);
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 3){
+    fprintf(2, "usage: find1 path name\n");
+    exit(1);
+  }
+  find(argv[1], argv[2]);
+  exit(0);
+}
+
+============================================================
+Q4) ONE-DIRECTION PIPE (parent -> child only)
+Write p2c_only.c:
+- Parent writes "hello" to child via one pipe
+- Child reads it and prints: "<pid>: child got hello"
+- No reply pipe.
+
+ANSWER (user/p2c_only.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p[2];
+  char buf[16];
+
+  pipe(p);
+
+  int pid = fork();
+  if(pid == 0){
+    // child reads
+    close(p[1]);                 // child not writing
+    int n = read(p[0], buf, sizeof(buf)-1);
+    if(n > 0){
+      buf[n] = 0;
+      printf("%d: child got %s\n", getpid(), buf);
+    }
+    close(p[0]);
+    exit(0);
+  } else {
+    // parent writes
+    close(p[0]);                 // parent not reading
+    write(p[1], "hello", 5);
+    close(p[1]);                 // important: close write end
+    wait(0);
+    exit(0);
+  }
+}
+
+============================================================
+Q5) SIMPLE FORK (child prints then parent prints)
+Write fork1.c:
+- fork a child
+- child prints "child pid=<pid>"
+- parent prints "parent pid=<pid>, child pid=<childpid>"
+- parent waits.
+
+ANSWER (user/fork1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int pid = fork();
+  if(pid == 0){
+    printf("child pid=%d\n", getpid());
+    exit(0);
+  } else if(pid > 0){
+    printf("parent pid=%d, child pid=%d\n", getpid(), pid);
+    wait(0);
+    exit(0);
+  } else {
+    fprintf(2, "fork failed\n");
+    exit(1);
+  }
+}
+
 ============================================================
 Q1) PINGPONG (1-byte handshake)
 Write a user program pingpong.c:

@@ -1,0 +1,2437 @@
+=====================================================
+SLEEP.C — STRAIGHTFORWARD MODIFICATIONS (ANSWERS)
+(Based on your existing Lab 1 sleep answer key)
+=====================================================
+
+BASELINE (your working sleep.c behavior)
+- Requires 1 argument: ticks
+- Converts argv[1] -> int
+- Calls pause(ticks)
+- exit(0)
+
+-----------------------------------------------------
+MOD 1 — DEFAULT TO 10 TICKS IF NO ARGUMENT GIVEN
+-----------------------------------------------------
+
+QUESTION:
+Modify sleep so that if no ticks argument is provided,
+it sleeps for 10 ticks instead of printing usage.
+
+FILES:
+- user/sleep.c
+
+FINAL CODE (copy-paste):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+    int ticks = 10; // default
+
+    if (argc >= 2) {
+        ticks = atoi(argv[1]);
+    }
+
+    pause(ticks);
+    exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 2 — VALIDATE TICKS (ticks MUST BE > 0)
+-----------------------------------------------------
+
+QUESTION:
+Modify sleep so that ticks <= 0 is invalid.
+If invalid, print:
+  invalid ticks
+and exit(1).
+
+FILES:
+- user/sleep.c
+
+FINAL CODE (copy-paste):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (argc < 2) {
+        printf("usage: sleep ticks\n");
+        exit(1);
+    }
+
+    int ticks = atoi(argv[1]);
+
+    if (ticks <= 0) {
+        printf("invalid ticks\n");
+        exit(1);
+    }
+
+    pause(ticks);
+    exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 3 — DEFAULT + VALIDATION (COMBINE MOD 1 AND MOD 2)
+-----------------------------------------------------
+
+QUESTION:
+Behavior:
+- If no arg: sleep 10 ticks
+- If ticks <= 0: print "invalid ticks" and exit(1)
+- Else pause(ticks)
+
+FILES:
+- user/sleep.c
+
+FINAL CODE (copy-paste):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+    int ticks = 10; // default
+
+    if (argc >= 2) {
+        ticks = atoi(argv[1]);
+    }
+
+    if (ticks <= 0) {
+        printf("invalid ticks\n");
+        exit(1);
+    }
+
+    pause(ticks);
+    exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 4 — SLEEP IN CHUNKS (LOOPED PAUSE)
+-----------------------------------------------------
+
+QUESTION:
+Modify sleep so that it pauses for 1 tick repeatedly
+until total ticks is reached.
+(Still same total sleep time.)
+
+FILES:
+- user/sleep.c
+
+FINAL CODE (copy-paste):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (argc < 2) {
+        printf("usage: sleep ticks\n");
+        exit(1);
+    }
+
+    int ticks = atoi(argv[1]);
+
+    if (ticks <= 0) {
+        printf("invalid ticks\n");
+        exit(1);
+    }
+
+    for (int i = 0; i < ticks; i++) {
+        pause(1);
+    }
+
+    exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 5 — NEW PROGRAM sleep2 (ticks + chunk size)
+-----------------------------------------------------
+
+QUESTION:
+Create a NEW user program:
+  sleep2 ticks chunk
+It should pause for total `ticks`, but in steps of `chunk`.
+Example:
+  sleep2 10 2  -> pause(2) 5 times
+If ticks<=0 or chunk<=0: print "invalid" and exit(1)
+
+FILES:
+- user/sleep2.c
+- Makefile (add _sleep2)
+
+FINAL CODE (copy-paste user/sleep2.c):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (argc < 3) {
+        printf("usage: sleep2 ticks chunk\n");
+        exit(1);
+    }
+
+    int ticks = atoi(argv[1]);
+    int chunk = atoi(argv[2]);
+
+    if (ticks <= 0 || chunk <= 0) {
+        printf("invalid\n");
+        exit(1);
+    }
+
+    int rem = ticks;
+    while (rem > 0) {
+        int step = (rem < chunk) ? rem : chunk;
+        pause(step);
+        rem -= step;
+    }
+
+    exit(0);
+}
+-----------------------------------------------------
+
+Makefile:
+- add:
+  _sleep2
+
+-----------------------------------------------------
+END
+-----------------------------------------------------
+
+
+
+
+=====================================================
+HELLO SYSCALL — STRAIGHTFORWARD MODIFICATIONS (ANSWERS)
+(Based on your Lab 2 "hello" syscall + user program)
+=====================================================
+
+BASELINE (what you already have)
+- user/hello.c calls hello() and prints return value
+- kernel has a hello syscall wired in (syscall.h, syscall.c, sysproc.c)
+- user/usys.pl has entry("hello")
+- user/user.h has int hello(void)
+- Makefile includes _hello
+
+-----------------------------------------------------
+MOD 1 — CHANGE RETURN VALUE + KERNEL PRINT MESSAGE
+-----------------------------------------------------
+
+QUESTION:
+Modify hello() so that it:
+1) prints "Hello from kernel syscall!"
+2) returns 1012
+
+FILES TO EDIT:
+- kernel/sysproc.c   (sys_hello)
+(NO other file needed if syscall already exists)
+
+ANSWER (kernel/sysproc.c):
+-----------------------------------------------------
+uint64
+sys_hello(void)
+{
+  printf("Hello from kernel syscall!\n");
+  return 1012;
+}
+-----------------------------------------------------
+
+user/hello.c can stay as:
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = hello();
+  printf("hello returned %d\n", r);
+  exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 2 — ADD A SECOND SYSCALL: goodbye()
+-----------------------------------------------------
+
+QUESTION:
+Add a new syscall goodbye() that:
+- prints "Goodbye from kernel syscall!"
+- returns 0
+Write user program goodbye that prints:
+  goodbye returned <value>
+
+FILES TO EDIT / ADD:
+Kernel:
+- kernel/syscall.h
+- kernel/syscall.c
+- kernel/sysproc.c
+(+ kernel/defs.h if your tree requires prototypes)
+User:
+- user/user.h
+- user/usys.pl
+- user/goodbye.c (new)
+- Makefile (add _goodbye)
+
+ANSWER STEPS + SNIPPETS:
+
+(1) kernel/syscall.h
+Add a new syscall number:
+-----------------------------------------------------
+#define SYS_goodbye  <next_available_number>
+-----------------------------------------------------
+
+(2) kernel/sysproc.c
+Implement handler:
+-----------------------------------------------------
+uint64
+sys_goodbye(void)
+{
+  printf("Goodbye from kernel syscall!\n");
+  return 0;
+}
+-----------------------------------------------------
+
+(3) kernel/syscall.c
+Add extern declaration:
+-----------------------------------------------------
+extern uint64 sys_goodbye(void);
+-----------------------------------------------------
+
+Add to syscall table:
+-----------------------------------------------------
+[SYS_goodbye] sys_goodbye,
+-----------------------------------------------------
+
+(4) user/user.h
+Add prototype:
+-----------------------------------------------------
+int goodbye(void);
+-----------------------------------------------------
+
+(5) user/usys.pl
+Add entry:
+-----------------------------------------------------
+entry("goodbye");
+-----------------------------------------------------
+
+(6) user/goodbye.c (new file)
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = goodbye();
+  printf("goodbye returned %d\n", r);
+  exit(0);
+}
+-----------------------------------------------------
+
+(7) Makefile
+Add program to UPROGS list:
+-----------------------------------------------------
+_goodbye
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 3 — HELLO PRINTS PID TOO (ONLY IF ASKED)
+-----------------------------------------------------
+
+QUESTION:
+Modify hello() so that it prints:
+  Hello from kernel syscall! pid=<pid>
+and returns 0.
+
+FILES TO EDIT:
+- kernel/sysproc.c
+
+ANSWER (kernel/sysproc.c):
+NOTE: pid access depends on your tree. Common xv6 pattern:
+-----------------------------------------------------
+uint64
+sys_hello(void)
+{
+  printf("Hello from kernel syscall! pid=%d\n", myproc()->pid);
+  return 0;
+}
+-----------------------------------------------------
+
+If myproc() not in scope in that file, the tree will usually already
+have a way to get current process (the lab will not ask pid if not).
+
+-----------------------------------------------------
+MOD 4 — USER PROGRAM CHANGES ONLY (NO KERNEL EDITS)
+-----------------------------------------------------
+
+QUESTION:
+Modify user/hello.c so it:
+- calls hello()
+- prints "kernel said: <returnvalue>"
+
+FILES:
+- user/hello.c only
+
+ANSWER (user/hello.c):
+-----------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = hello();
+  printf("kernel said: %d\n", r);
+  exit(0);
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 5 — HELLO TAKES ONE ARGUMENT (ADVANCED, ONLY IF ASKED)
+-----------------------------------------------------
+
+QUESTION:
+Change hello to accept an int argument n from user program:
+  int hello(int n);
+Kernel prints n and returns n+1.
+
+FILES (changes syscall signature):
+User:
+- user/user.h
+- user/usys.pl (usually needs arg handling in xv6 calling convention)
+Kernel:
+- kernel/sysproc.c (use argint to read syscall arg)
+
+NOTE:
+This is MORE complex and only asked if your lab taught syscall args.
+
+KERNEL HANDLER SHAPE (kernel/sysproc.c):
+-----------------------------------------------------
+uint64
+sys_hello(void)
+{
+  int n;
+  if (argint(0, &n) < 0)
+    return -1;
+  printf("hello got %d\n", n);
+  return n + 1;
+}
+-----------------------------------------------------
+
+USER PROGRAM SHAPE:
+-----------------------------------------------------
+int n = atoi(argv[1]);
+int r = hello(n);
+printf("%d\n", r);
+-----------------------------------------------------
+
+(Only include this mod in cheatsheet if your lab covered syscall args.)
+
+-----------------------------------------------------
+END
+-----------------------------------------------------		
+
+
+=====================================================
+MEMDUMP — STRAIGHTFORWARD MODIFICATIONS (ANSWERS)
+(Based on your existing Lab 1 memdump answer key)
+=====================================================
+
+BASELINE (what your memdump already does)
+- Reads memory using a format string
+- Uses pointer `p` to walk through data
+- Supported formats:
+  c  -> 1 byte char
+  h  -> 2 byte short
+  i  -> 4 byte int
+  p  -> 8 byte pointer printed as hex
+  s  -> 8 byte address, print string at that address
+  S  -> print string starting at p, then STOP
+
+-----------------------------------------------------
+MOD 1 — ADD FORMAT 'u' (UNSIGNED 4-BYTE INTEGER)
+-----------------------------------------------------
+
+QUESTION:
+Extend memdump so that format character 'u' reads
+4 bytes from memory and prints them as an UNSIGNED
+decimal integer.
+
+FILES:
+- user/memdump.c
+
+ADD THIS CASE INSIDE memdump() SWITCH:
+-----------------------------------------------------
+case 'u':
+{
+    uint value;
+    memmove(&value, p, 4);
+    printf("%u\n", value);
+    p += 4;
+    break;
+}
+-----------------------------------------------------
+
+NO OTHER CHANGES REQUIRED.
+
+-----------------------------------------------------
+MOD 2 — ADD "0x" PREFIX TO POINTER OUTPUT ('p')
+-----------------------------------------------------
+
+QUESTION:
+Modify memdump so that pointer output includes a
+"0x" prefix before the hexadecimal digits.
+
+FILES:
+- user/memdump.c
+
+MODIFY case 'p':
+
+ORIGINAL (simplified):
+-----------------------------------------------------
+for (int i = 7; i >= 0; i--) {
+    unsigned char b = (v >> (i * 8)) & 0xff;
+    printf("%c", hex[b >> 4]);
+    printf("%c", hex[b & 0x0f]);
+}
+printf("\n");
+-----------------------------------------------------
+
+MODIFIED:
+-----------------------------------------------------
+printf("0x");
+for (int i = 7; i >= 0; i--) {
+    unsigned char b = (v >> (i * 8)) & 0xff;
+    printf("%c", hex[b >> 4]);
+    printf("%c", hex[b & 0x0f]);
+}
+printf("\n");
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 3 — CHANGE 'S' SO IT CONTINUES INSTEAD OF STOPPING
+-----------------------------------------------------
+
+QUESTION:
+Modify memdump so that format 'S':
+- prints the string starting at p
+- advances p past the null terminator
+- continues processing the remaining format characters
+
+FILES:
+- user/memdump.c
+
+ORIGINAL:
+-----------------------------------------------------
+case 'S':
+{
+    printf("%s\n", p);
+    return;
+}
+-----------------------------------------------------
+
+MODIFIED:
+-----------------------------------------------------
+case 'S':
+{
+    printf("%s\n", p);
+    p += strlen(p) + 1;
+    break;
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 4 — ADD FORMAT 'b' (PRINT RAW BYTE AS DECIMAL)
+-----------------------------------------------------
+
+QUESTION:
+Extend memdump with format character 'b':
+- reads 1 byte
+- prints its UNSIGNED decimal value (0–255)
+
+FILES:
+- user/memdump.c
+
+ADD THIS CASE:
+-----------------------------------------------------
+case 'b':
+{
+    unsigned char v = *(unsigned char *)p;
+    printf("%d\n", v);
+    p += 1;
+    break;
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 5 — IGNORE UNKNOWN FORMAT CHARACTERS
+-----------------------------------------------------
+
+QUESTION:
+Modify memdump so that unknown format characters
+are ignored instead of doing nothing silently.
+
+Behavior:
+- Print:
+  unknown format: X
+- Continue processing remaining format characters
+
+FILES:
+- user/memdump.c
+
+MODIFY default CASE:
+-----------------------------------------------------
+default:
+{
+    printf("unknown format: %c\n", fmt[i]);
+    break;
+}
+-----------------------------------------------------
+
+
+-----------------------------------------------------
+END
+-----------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+=====================================================
+SIXFIVE — STRAIGHTFORWARD MODIFICATIONS (ANSWERS)
+(Based on your existing sixfive answer key)
+=====================================================
+
+-----------------------------------------------------
+MOD 2 — PRINT FILENAME BEFORE EACH NUMBER
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that each printed number is prefixed
+with the filename in which it was found.
+
+Output format:
+filename:number
+
+WHAT TO CHANGE:
+Only the printf line.
+
+ORIGINAL:
+printf("%d\n", num);
+
+MODIFIED:
+printf("%s:%d\n", argv[a], num);
+
+NO OTHER CHANGES REQUIRED.
+
+-----------------------------------------------------
+MOD 3 — IGNORE NUMBERS LONGER THAN 5 DIGITS
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that numbers containing more than
+5 digits are ignored.
+
+WHAT THIS MEANS:
+- You already count digits using variable `i`
+- Only process the number if i <= 5
+
+CHANGE #1 (inside main loop, when finalising a number):
+
+ORIGINAL:
+if (i > 0 && is_sep(c) == 1)
+{
+    digits[i] = '\0';
+    int num = atoi(digits);
+
+    if (num % 5 == 0 || num % 6 == 0)
+    {
+        printf("%d\n", num);
+    }
+}
+
+MODIFIED:
+if (i > 0 && is_sep(c) == 1)
+{
+    if (i <= 5)
+    {
+        digits[i] = '\0';
+        int num = atoi(digits);
+
+        if (num % 5 == 0 || num % 6 == 0)
+        {
+            printf("%d\n", num);
+        }
+    }
+}
+
+CHANGE #2 (end-of-file flush):
+
+ORIGINAL:
+if (i > 0)
+{
+    digits[i] = '\0';
+    int num = atoi(digits);
+
+    if (num % 5 == 0 || num % 6 == 0)
+    {
+        printf("%d\n", num);
+    }
+}
+
+MODIFIED:
+if (i > 0 && i <= 5)
+{
+    digits[i] = '\0';
+    int num = atoi(digits);
+
+    if (num % 5 == 0 || num % 6 == 0)
+    {
+        printf("%d\n", num);
+    }
+}
+
+-----------------------------------------------------
+MOD 4 — ALLOW NUMBERS TO END WITH LETTERS (BUT NOT START)
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that numbers may end with letters,
+but must not start with letters.
+
+Examples:
+123abc   -> valid (prints 123)
+abc123   -> invalid (ignored)
+
+WHAT CHANGES LOGICALLY:
+- You KEEP the "do not start after letters" rule (prev logic)
+- You FINALISE number when a NON-DIGIT appears
+  (not only when is_sep(c) == 1)
+
+CHANGE #1 — MODIFY THE ELSE BLOCK CONDITION
+
+ORIGINAL:
+else
+{
+    if (i > 0 && is_sep(c) == 1)
+    {
+        digits[i] = '\0';
+        int num = atoi(digits);
+
+        if (num % 5 == 0 || num % 6 == 0)
+        {
+            printf("%d\n", num);
+        }
+    }
+    i = 0;
+}
+
+MODIFIED:
+else
+{
+    if (i > 0)
+    {
+        digits[i] = '\0';
+        int num = atoi(digits);
+
+        if (num % 5 == 0 || num % 6 == 0)
+        {
+            printf("%d\n", num);
+        }
+    }
+    i = 0;
+}
+
+IMPORTANT:
+- Do NOT remove the earlier check:
+  if (i == 0 && is_sep(prev) == 0)
+This still blocks numbers starting after letters.
+
+-----------------------------------------------------
+MOD 5 — PRINT EACH NUMBER ONLY ONCE PER FILE
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that each qualifying number is printed
+at most once per file.
+
+WHAT THIS MEANS:
+- You need to remember which numbers were already printed
+- Simple fixed-size array is enough
+
+ADD AT TOP OF FILE (or inside main before loop):
+-------------------------------------------------
+int seen[100];
+int seen_count = 0;
+-------------------------------------------------
+
+ADD HELPER CHECK BEFORE PRINTING:
+-------------------------------------------------
+int already_seen = 0;
+for (int s = 0; s < seen_count; s++)
+{
+    if (seen[s] == num)
+    {
+        already_seen = 1;
+        break;
+    }
+}
+-------------------------------------------------
+
+MODIFY PRINT BLOCK:
+
+ORIGINAL:
+if (num % 5 == 0 || num % 6 == 0)
+{
+    printf("%d\n", num);
+}
+
+MODIFIED:
+if (num % 5 == 0 || num % 6 == 0)
+{
+    int already_seen = 0;
+    for (int s = 0; s < seen_count; s++)
+    {
+        if (seen[s] == num)
+        {
+            already_seen = 1;
+            break;
+        }
+    }
+
+    if (!already_seen)
+    {
+        seen[seen_count++] = num;
+        printf("%d\n", num);
+    }
+}
+
+IMPORTANT:
+- Reset seen_count = 0 at the START of EACH FILE
+  (inside for (int a = 1; a < argc; a++))
+
+-----------------------------------------------------
+END
+-----------------------------------------------------
+
+=====================================================
+XARGS — COURSE-REALISTIC MODIFICATIONS (FULL QN + ANSWER)
+(Your preferred format: FULL question + example + EXACT code edits)
+Based on YOUR working xargs answer key.
+=====================================================
+
+NOTE: In all mods below, the only file is usually:
+- user/xargs.c
+(and Makefile only if you add a NEW program name)
+
+-----------------------------------------------------
+MOD 1 — WHITESPACE: SUPPORT TABS + MULTI-SPACES
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that it treats both SPACE and TAB as separators.
+Multiple spaces/tabs should be ignored.
+
+Example:
+Command:
+  xargs echo
+Input:
+  a\tb   c
+Expected exec argv:
+  echo a b c
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+Find these parts in your tokenizer:
+
+(1) skip spaces
+ORIGINAL:
+  while (*ptr == ' ') ptr++;
+
+REPLACE WITH:
+  while (*ptr == ' ' || *ptr == '\t') ptr++;
+
+(2) find end of a word
+ORIGINAL:
+  while (*ptr && *ptr != ' ') ptr++;
+
+REPLACE WITH:
+  while (*ptr && *ptr != ' ' && *ptr != '\t') ptr++;
+
+Done.
+
+-----------------------------------------------------
+MOD 2 — PER-LINE EXECUTION (NO CROSS-LINE BATCHING)
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that it executes EXACTLY ONCE per input line.
+Tokens from different lines must NOT be combined.
+
+Example:
+Command:
+  xargs echo
+Input:
+  1 2
+  3 4 5
+Expected executions:
+  echo 1 2
+  echo 3 4 5
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+Your current code batches across lines because arg_idx/new_args keep going.
+
+DO THIS:
+
+A) At the START of each line (immediately inside while(fetch_line...)),
+ADD reset:
+  arg_idx = fixed_count;
+  new_args = 0;
+
+So:
+while (fetch_line(input_line)) {
+  arg_idx = fixed_count;
+  new_args = 0;
+  char *ptr = input_line;
+  ...
+
+B) After you finish tokenizing the line (right before the while(fetch_line) loops again),
+EXEC ONCE:
+
+ADD:
+  if (new_args > 0) {
+    exec_args[arg_idx] = 0;
+    if (fork() == 0) {
+      exec(exec_args[0], exec_args);
+      exit(1);
+    }
+    wait(0);
+    for (int k = fixed_count; k < arg_idx; k++) free(exec_args[k]);
+  }
+
+C) Remove / ignore your old batching-by-limit block inside token loop
+(OR keep it but set limit = -1 so it never triggers).
+Simplest: delete the “if (limit != -1 && new_args == limit) { ... }” block.
+
+-----------------------------------------------------
+MOD 3 — IGNORE BLANK / WHITESPACE-ONLY LINES
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that blank lines (or lines with only spaces/tabs)
+do not execute the command.
+
+Example:
+Input:
+  <blank>
+  a b
+Expected:
+  (no exec for blank)
+  exec for "a b"
+
+FILES:
+- user/xargs.c
+
+ANSWER:
+If you implement MOD 2 (per-line exec), then this becomes automatic:
+- blank line => new_args == 0 => skip exec.
+
+If you are NOT doing per-line exec, then ensure your FINAL exec is guarded:
+  if (new_args > 0) { ... exec ... }
+Your code already has that.
+
+If tabs are included, combine with MOD 1.
+
+-----------------------------------------------------
+MOD 4 — ADD FLAG: -t TRACE (PRINT COMMAND BEFORE EXEC)
+-----------------------------------------------------
+
+FULL QUESTION:
+Add support for flag -t. When -t is used, xargs should print the full
+argv it is about to execute (one line), before each exec.
+
+Example:
+Command:
+  xargs -t echo A
+Input:
+  1 2
+Expected output (trace line):
+  echo A 1 2
+(then the actual echo output too)
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+A) Add variables at top of main:
+  int trace = 0;
+
+B) Parse -t (similar to -n):
+Add before -n parsing, or combine parsing:
+If argv[1] is "-t":
+  trace = 1;
+  start_at = 2;
+
+If you also allow "-n", simplest exam-safe parsing:
+- handle "-t" first, then handle "-n" starting from start_at.
+
+C) Add this helper print block RIGHT BEFORE fork() exec happens
+(in BOTH exec places: inside batching block and final exec):
+
+  if (trace) {
+    for (int i = 0; exec_args[i] != 0; i++) {
+      if (i) printf(" ");
+      printf("%s", exec_args[i]);
+    }
+    printf("\n");
+  }
+
+Done.
+
+-----------------------------------------------------
+MOD 5 — CHANGE INPUT SPLIT RULE: ONE TOKEN PER LINE ONLY
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that each input line is treated as ONE argument
+(including spaces inside the line).
+
+Example:
+Command:
+  xargs echo
+Input:
+  hello world
+Expected execution:
+  echo "hello world"
+(i.e., argv has a single token "hello world")
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+Replace the tokenization loop with:
+- After fetch_line, if line is not empty:
+  exec_args[fixed_count] = malloc(strlen(input_line)+1);
+  strcpy(exec_args[fixed_count], input_line);
+  exec_args[fixed_count+1] = 0;
+  fork/exec/wait
+  free(exec_args[fixed_count])
+
+Meaning:
+- DO NOT split by spaces anymore.
+- Treat input_line itself as the token.
+
+(Exam hint: they will explicitly say “do not split on spaces”.)
+
+-----------------------------------------------------
+MOD 6 — STOP AFTER K LINES / K EXECUTIONS
+-----------------------------------------------------
+
+FULL QUESTION:
+Add support for -m K so that xargs executes at most K times total.
+
+Example:
+Command:
+  xargs -m 2 echo
+Input:
+  1
+  2
+  3
+Expected:
+  echo 1
+  echo 2
+(stop; ignore remaining)
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+A) Parse flag:
+  int maxruns = -1;
+If argv has "-m K", set maxruns = atoi(K) and shift start_at.
+
+B) Track runs:
+  int runs = 0;
+
+C) Each time you execute, after wait():
+  runs++;
+  if (maxruns != -1 && runs >= maxruns) break;
+
+Works best with MOD 2 (per-line exec), but also works with batching.
+
+-----------------------------------------------------
+MOD 7 — HANDLE TOO MANY ARGS (MAXARG SAFETY)
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so it never exceeds MAXARG arguments.
+If adding another token would exceed MAXARG-1 (need space for 0 terminator),
+execute current batch first, then continue.
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+Before adding a new token into exec_args[arg_idx]:
+Check:
+  if (arg_idx >= MAXARG - 1) {
+    // exec current batch (same exec block you already have)
+    // free stdin-added args
+    // reset arg_idx = fixed_count; new_args = 0;
+  }
+
+Then proceed to add token normally.
+
+This is a VERY realistic “safe programming” variant.
+
+-----------------------------------------------------
+MOD 8 — N-1 VARIANTS (REFERENCE, NOT REPEATED)
+-----------------------------------------------------
+
+If they say:
+  "-n limits stdin args only" -> new_args == limit  (NO N-1)
+If they say:
+  "-n limits total exec args" -> allowed = limit - fixed_count (YES N-1)
+
+(See the previous N-1 answer block you already copied.)
+
+=====================================================
+WHAT TYPES OF XARGS QUESTIONS YOUR COURSE LIKELY USES
+=====================================================
+
+Given your course style (straightforward modifications of labs):
+Most likely:
+- MOD 1 (tabs/whitespace)
+- MOD 2 (per-line exec)
+- MOD 4 (trace)
+- MOD 7 (MAXARG safety)
+- N-1 wording flip (stdin-only vs total-exec)
+
+Less likely unless taught:
+- quoting support ("two words") (harder tokenizer)
+
+=====================================================
+XARGS — N-1 RULE MODIFICATIONS (YOUR PREFERRED FORMAT)
+(Full question + example + EXACT code changes to make)
+=====================================================
+
+---------------------------------------------
+MOD A — REMOVE THE “N-1” RULE (MOST EXAM-LIKELY)
+---------------------------------------------
+
+FULL QUESTION (lab-style):
+You are given your existing xargs implementation which supports:
+  xargs [-n N] command [args...]
+
+Modify xargs so that when -n N is provided, N limits ONLY the number of
+arguments read from standard input (stdin). The fixed command-line
+arguments must NOT be counted toward N.
+
+Example:
+Command:
+  xargs -n 3 echo A
+Input (stdin):
+  1 2 3 4 5 6
+Expected executions:
+  echo A 1 2 3
+  echo A 4 5 6
+
+FILES:
+- user/xargs.c
+
+ANSWER (what to change EXACTLY):
+In your xargs.c, find THIS block (you already have it):
+
+  if (limit != -1 && new_args == limit) {
+    exec_args[arg_idx] = 0;
+    if (fork() == 0) {
+      exec(exec_args[0], exec_args);
+      exit(1);
+    }
+    wait(0);
+
+    for(int k = fixed_count; k < arg_idx; k++) {
+      free(exec_args[k]);
+    }
+    arg_idx = fixed_count;
+    new_args = 0;
+  }
+
+CHANGE REQUIRED:
+✅ KEEP THIS BLOCK EXACTLY AS-IS.
+
+The ONLY rule for “remove N-1” is:
+✅ DO NOT subtract fixed_count from limit.
+✅ DO NOT create an `allowed = limit - fixed_count`.
+✅ DO NOT change the comparison new_args == limit.
+
+That’s it. Your current batching already matches “stdin-only”.
+
+(So in practice: if your current code already uses new_args==limit,
+you are DONE for this mod.)
+
+---------------------------------------------
+MOD B — ENFORCE “N-1” RULE (TOTAL ARGS TO EXEC <= N)
+---------------------------------------------
+
+FULL QUESTION (lab-style):
+Modify xargs so that when -n N is provided, N limits the TOTAL number of
+arguments passed to exec(), INCLUDING the fixed command-line arguments.
+
+Example:
+Command:
+  xargs -n 3 echo A
+Fixed args: echo A  (2 args)
+So each exec can add only 1 stdin token.
+
+Input:
+  1 2 3 4
+Expected executions:
+  echo A 1
+  echo A 2
+  echo A 3
+  echo A 4
+
+FILES:
+- user/xargs.c
+
+ANSWER (what to change EXACTLY):
+
+STEP 1: After you copy fixed args and set fixed_count,
+ADD this variable:
+
+Find in your code:
+  int fixed_count = arg_idx;
+  int new_args = 0;
+
+ADD AFTER THAT:
+  int allowed = limit;
+
+AND THEN add this:
+  if (limit != -1) {
+    allowed = limit - fixed_count;
+    if (allowed < 1) allowed = 1;
+  }
+
+So it becomes:
+  int fixed_count = arg_idx;
+  int new_args = 0;
+  int allowed = limit;
+
+  if (limit != -1) {
+    allowed = limit - fixed_count;
+    if (allowed < 1) allowed = 1;
+  }
+
+STEP 2: Replace the trigger condition for execution.
+
+Find:
+  if (limit != -1 && new_args == limit) {
+
+REPLACE WITH:
+  if (limit != -1 && new_args == allowed) {
+
+That’s it. Everything else (fork/exec/wait/free/reset) stays the same.
+
+---------------------------------------------
+MOD C — VERY COMMON VARIANT WORDING (HOW TO SPOT WHICH ONE)
+---------------------------------------------
+
+If the question says:
+  "-n limits the number of arguments read from stdin"
+→ USE MOD A (NO N-1)
+→ keep new_args == limit
+
+If the question says:
+  "-n limits the number of arguments passed to exec"
+→ USE MOD B (YES N-1)
+→ use allowed = limit - fixed_count and new_args == allowed
+
+=====================================================
+END
+=====================================================
+
+=====================================================================
+10 REALISTIC “3RD PRACTICAL” QUESTIONS (EARLY XV6 INTERFACE) + FULL CODE
+All are user programs only (no kernel edits).
+For each: create file in user/, add _name to Makefile UPROGS.
+=====================================================================
+
+---------------------------------------------------------------------
+Q1) pingpong (classic) — 2 pipes, one byte each way
+---------------------------------------------------------------------
+QUESTION:
+Write a user program pingpong that creates two pipes and forks.
+Parent sends byte 'P' to child. Child prints:
+  child received P
+Then child sends byte 'C' back. Parent prints:
+  parent received C
+Close unused pipe ends correctly.
+
+FILE: user/pingpong.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+  int p2c[2], c2p[2];
+int
+main(void)
+{
+
+  if (pipe(p2c) < 0 || pipe(c2p) < 0) {
+    fprintf(2, "pingpong: pipe failed\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(2, "pingpong: fork failed\n");
+    exit(1);
+  }
+
+  if (pid == 0) {
+    // child
+    close(p2c[1]);
+    close(c2p[0]);
+
+    char b;
+    if (read(p2c[0], &b, 1) != 1) {
+      fprintf(2, "pingpong: child read failed\n");
+      exit(1);
+    }
+    printf("child received %c\n", b);
+
+    b = 'C';
+    if (write(c2p[1], &b, 1) != 1) {
+      fprintf(2, "pingpong: child write failed\n");
+      exit(1);
+    }
+
+    close(p2c[0]);
+    close(c2p[1]);
+    exit(0);
+  } else {
+    // parent
+    close(p2c[0]);
+    close(c2p[1]);
+
+    char b = 'P';
+    if (write(p2c[1], &b, 1) != 1) {
+      fprintf(2, "pingpong: parent write failed\n");
+      exit(1);
+    }
+
+    if (read(c2p[0], &b, 1) != 1) {
+      fprintf(2, "pingpong: parent read failed\n");
+      exit(1);
+    }
+    printf("parent received %c\n", b);
+
+    close(p2c[1]);
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}
+
+---------------------------------------------------------------------
+Q2) sleepx — sleep N ticks, but print a message before/after
+---------------------------------------------------------------------
+QUESTION:
+Write sleepx N that prints:
+  start
+then sleeps N ticks using pause(N), then prints:
+  done
+
+FILE: user/sleepx.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc != 2) {
+    fprintf(2, "usage: sleepx ticks\n");
+    exit(1);
+  }
+
+  int ticks = atoi(argv[1]);
+  printf("start\n");
+  pause(ticks);
+  printf("done\n");
+  exit(0);
+}
+
+---------------------------------------------------------------------
+Q3) redirin — run CMD with stdin redirected from a file
+---------------------------------------------------------------------
+QUESTION:
+Write redirin INFILE CMD [ARGS...]
+Run CMD with stdin (fd 0) redirected from INFILE.
+
+Example:
+  redirin input.txt wc
+
+FILE: user/redirin.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fcntl.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc < 3) {
+    fprintf(2, "usage: redirin INFILE CMD [ARGS...]\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(2, "redirin: fork failed\n");
+    exit(1);
+  }
+
+  if (pid == 0) {
+    close(0);
+    int fd = open(argv[1], O_RDONLY);
+    if (fd < 0) {
+      fprintf(2, "redirin: cannot open %s\n", argv[1]);
+      exit(1);
+    }
+    exec(argv[2], &argv[2]);
+    fprintf(2, "redirin: exec %s failed\n", argv[2]);
+    exit(1);
+  }
+
+  wait(0);
+  exit(0);
+}
+
+---------------------------------------------------------------------
+Q4) pipewc — implement: echo TEXT | wc (inside your program)
+---------------------------------------------------------------------
+QUESTION:
+Write pipewc TEXT that runs /bin/wc with stdin coming from a pipe that
+contains TEXT plus a newline.
+
+FILE: user/pipewc.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc != 2) {
+    fprintf(2, "usage: pipewc TEXT\n");
+    exit(1);
+  }
+
+  int p[2];
+  if (pipe(p) < 0) {
+    fprintf(2, "pipewc: pipe failed\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(2, "pipewc: fork failed\n");
+    exit(1);
+  }
+
+  if (pid == 0) {
+    // child runs wc, reads from pipe
+    close(0);
+    dup(p[0]);
+    close(p[0]);
+    close(p[1]);
+    char *wargv[] = { "wc", 0 };
+    exec("/bin/wc", wargv);
+    fprintf(2, "pipewc: exec wc failed\n");
+    exit(1);
+  } else {
+    // parent writes TEXT\n to pipe
+    close(p[0]);
+    write(p[1], argv[1], strlen(argv[1]));
+    write(p[1], "\n", 1);
+    close(p[1]);
+    wait(0);
+    exit(0);
+  }
+}
+
+---------------------------------------------------------------------
+Q5) dupdemo — redirect stderr to stdout (2>&1) for a command
+---------------------------------------------------------------------
+QUESTION:
+Write err2out CMD [ARGS...] that runs CMD such that fd 2 is duplicated
+from fd 1 (stderr goes to stdout). (Like 2>&1)
+
+FILE: user/err2out.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc < 2) {
+    fprintf(2, "usage: err2out CMD [ARGS...]\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(2, "err2out: fork failed\n");
+    exit(1);
+  }
+
+  if (pid == 0) {
+    close(2);
+    dup(1);     // new fd will be 2
+    exec(argv[1], &argv[1]);
+    fprintf(2, "err2out: exec failed\n");
+    exit(1);
+  }
+
+  wait(0);
+  exit(0);
+}
+
+---------------------------------------------------------------------
+Q6) cat1 — print first N bytes of a file
+---------------------------------------------------------------------
+QUESTION:
+Write cat1 N FILE that prints the first N bytes of FILE to stdout.
+
+FILE: user/cat1.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fcntl.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc != 3) {
+    fprintf(2, "usage: cat1 N FILE\n");
+    exit(1);
+  }
+
+  int want = atoi(argv[1]);
+  int fd = open(argv[2], O_RDONLY);
+  if (fd < 0) {
+    fprintf(2, "cat1: cannot open %s\n", argv[2]);
+    exit(1);
+  }
+
+  char buf[256];
+  while (want > 0) {
+    int chunk = want < (int)sizeof(buf) ? want : (int)sizeof(buf);
+    int n = read(fd, buf, chunk);
+    if (n == 0)
+      break;
+    if (n < 0) {
+      fprintf(2, "cat1: read error\n");
+      close(fd);
+      exit(1);
+    }
+    if (write(1, buf, n) != n) {
+      fprintf(2, "cat1: write error\n");
+      close(fd);
+      exit(1);
+    }
+    want -= n;
+  }
+
+  close(fd);
+  exit(0);
+}
+
+---------------------------------------------------------------------
+Q7) mktemp — create then unlink file (classic temp inode trick)
+---------------------------------------------------------------------
+QUESTION:
+Write mktemp that creates a file named "tmpx", opens it read/write,
+then unlinks it immediately, writes "hello\n" to it, seeks is not available
+in xv6, so just close and exit. (The file should disappear after exit.)
+
+FILE: user/mktemp.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fcntl.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int fd = open("tmpx", O_CREATE | O_RDWR);
+  if (fd < 0) {
+    fprintf(2, "mktemp: open failed\n");
+    exit(1);
+  }
+
+  if (unlink("tmpx") < 0) {
+    fprintf(2, "mktemp: unlink failed\n");
+    close(fd);
+    exit(1);
+  }
+
+  write(fd, "hello\n", 6);
+  close(fd);
+  exit(0);
+}
+
+---------------------------------------------------------------------
+Q8) forkchain — create 3 processes in a chain (parent -> child -> grandchild)
+---------------------------------------------------------------------
+QUESTION:
+Write forkchain that creates a child, and the child creates a grandchild.
+Print exactly:
+  parent
+  child
+  grandchild
+in that order (must use wait to enforce order).
+
+FILE: user/forkchain.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int pid = fork();
+  if (pid < 0) exit(1);
+
+  if (pid == 0) {
+    int pid2 = fork();
+    if (pid2 < 0) exit(1);
+
+    if (pid2 == 0) {
+      printf("grandchild\n");
+      exit(0);
+    } else {
+      wait(0);
+      printf("child\n");
+      exit(0);
+    }
+  } else {
+    wait(0);
+    printf("parent\n");
+    exit(0);
+  }
+}
+
+---------------------------------------------------------------------
+Q9) runpipe — implement CMD1 | CMD2 (fixed: no fancy parsing)
+---------------------------------------------------------------------
+QUESTION:
+Write runpipe that takes exactly 2 commands with no extra args:
+  runpipe cmd1 cmd2
+It should run cmd1 | cmd2.
+
+FILE: user/runpipe.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc != 3) {
+    fprintf(2, "usage: runpipe cmd1 cmd2\n");
+    exit(1);
+  }
+
+  int p[2];
+  if (pipe(p) < 0) {
+    fprintf(2, "runpipe: pipe failed\n");
+    exit(1);
+  }
+
+  int left = fork();
+  if (left < 0) exit(1);
+  if (left == 0) {
+    close(1);
+    dup(p[1]);
+    close(p[0]);
+    close(p[1]);
+    char *a[] = { argv[1], 0 };
+    exec(argv[1], a);
+    fprintf(2, "runpipe: exec left failed\n");
+    exit(1);
+  }
+
+  int right = fork();
+  if (right < 0) exit(1);
+  if (right == 0) {
+    close(0);
+    dup(p[0]);
+    close(p[0]);
+    close(p[1]);
+    char *a[] = { argv[2], 0 };
+    exec(argv[2], a);
+    fprintf(2, "runpipe: exec right failed\n");
+    exit(1);
+  }
+
+  close(p[0]);
+  close(p[1]);
+  wait(0);
+  wait(0);
+  exit(0);
+}
+
+---------------------------------------------------------------------
+Q10) findstr (mini grep-lite) — match substring (NOT regex)
+---------------------------------------------------------------------
+QUESTION:
+Write findstr PATTERN FILE that prints any line in FILE that contains
+PATTERN as a substring. (No regex, just substring search.)
+Use read() and line splitting like the grep demo, but substring match only.
+
+FILE: user/findstr.c
+CODE:
+---------------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fcntl.h"
+#include "user/user.h"
+
+static int
+contains(char *line, char *pat)
+{
+  int n = strlen(line);
+  int m = strlen(pat);
+  if (m == 0) return 1;
+  for (int i = 0; i + m <= n; i++) {
+    int ok = 1;
+    for (int j = 0; j < m; j++) {
+      if (line[i+j] != pat[j]) { ok = 0; break; }
+    }
+    if (ok) return 1;
+  }
+  return 0;
+}
+
+char buf[1024];
+
+int
+main(int argc, char *argv[])
+{
+  if (argc != 3) {
+    fprintf(2, "usage: findstr PATTERN FILE\n");
+    exit(1);
+  }
+
+  char *pat = argv[1];
+  int fd = open(argv[2], O_RDONLY);
+  if (fd < 0) {
+    fprintf(2, "findstr: cannot open %s\n", argv[2]);
+    exit(1);
+  }
+
+  int m = 0;
+  int n;
+  while ((n = read(fd, buf + m, sizeof(buf) - m - 1)) > 0) {
+    m += n;
+    buf[m] = 0;
+
+    char *p = buf;
+    char *q;
+    while ((q = strchr(p, '\n')) != 0) {
+      *q = 0;
+      if (contains(p, pat)) {
+        *q = '\n';
+        write(1, p, q + 1 - p);
+      } else {
+        *q = '\n';
+      }
+      p = q + 1;
+    }
+
+    // move leftover partial line to beginning
+    m -= (p - buf);
+    memmove(buf, p, m);
+  }
+
+  close(fd);
+  exit(0);
+}
+
+=====================================================================
+END
+=====================================================================
+
+=====================================================================
+5 REALISTIC KERNEL-EDIT PRACTICAL QUESTIONS (XV6, TOPIC 1–2)
+Each includes:
+- Full question
+- Files to edit
+- Full code to add / modify
+=====================================================================
+
+=====================================================
+Q1) ADD A SYSCALL: getppid()
+=====================================================
+
+QUESTION:
+Add a new system call getppid() that returns the PID of the
+parent process of the calling process.
+
+Then write a user program ppid that prints:
+  parent pid = <value>
+
+FILES TO EDIT:
+Kernel:
+- kernel/syscall.h
+- kernel/syscall.c
+- kernel/sysproc.c
+- kernel/defs.h (if required)
+User:
+- user/user.h
+- user/usys.pl
+- user/ppid.c
+- Makefile
+
+-----------------------------
+KERNEL CHANGES
+-----------------------------
+
+kernel/syscall.h
+(add new syscall number)
+---------------------------------
+#define SYS_getppid  <next_number>
+---------------------------------
+
+kernel/sysproc.c
+(add handler)
+---------------------------------
+uint64
+sys_getppid(void)
+{
+  struct proc *p = myproc();
+  if (p->parent)
+    return p->parent->pid;
+  return -1;
+}
+---------------------------------
+
+kernel/syscall.c
+(add declaration)
+---------------------------------
+extern uint64 sys_getppid(void);
+---------------------------------
+
+(add to syscall table)
+---------------------------------
+[SYS_getppid] sys_getppid,
+---------------------------------
+
+kernel/defs.h (if your tree needs prototypes)
+---------------------------------
+uint64 sys_getppid(void);
+---------------------------------
+
+-----------------------------
+USER CHANGES
+-----------------------------
+
+user/user.h
+---------------------------------
+int getppid(void);
+---------------------------------
+
+user/usys.pl
+---------------------------------
+entry("getppid");
+---------------------------------
+
+user/ppid.c
+---------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int p = getppid();
+  printf("parent pid = %d\n", p);
+  exit(0);
+}
+---------------------------------
+
+Makefile
+(add to UPROGS)
+---------------------------------
+_ppid
+---------------------------------
+
+=====================================================
+Q2) MODIFY hello(): PRINT PID AND RETURN PID
+=====================================================
+
+QUESTION:
+Modify the existing hello syscall so that it:
+- prints "hello from pid <pid>"
+- returns the pid of the calling process
+
+User program should print the returned value.
+
+FILES TO EDIT:
+Kernel:
+- kernel/sysproc.c
+User:
+- user/hello.c (already exists)
+
+-----------------------------
+KERNEL CHANGE
+-----------------------------
+
+kernel/sysproc.c
+---------------------------------
+uint64
+sys_hello(void)
+{
+  int pid = myproc()->pid;
+  printf("hello from pid %d\n", pid);
+  return pid;
+}
+---------------------------------
+
+-----------------------------
+USER PROGRAM
+-----------------------------
+
+user/hello.c
+---------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int r = hello();
+  printf("hello returned %d\n", r);
+  exit(0);
+}
+---------------------------------
+
+=====================================================
+Q3) ADD SYSCALL: uptime2()
+=====================================================
+
+QUESTION:
+Add a system call uptime2() that returns the number of clock
+ticks since boot (same value as uptime()), but ALSO prints:
+  uptime syscall called
+
+Then write a user program that prints the returned value.
+
+FILES TO EDIT:
+Kernel:
+- kernel/syscall.h
+- kernel/syscall.c
+- kernel/sysproc.c
+User:
+- user/user.h
+- user/usys.pl
+- user/uptime2.c
+- Makefile
+
+-----------------------------
+KERNEL CHANGES
+-----------------------------
+
+kernel/syscall.h
+---------------------------------
+#define SYS_uptime2  <next_number>
+---------------------------------
+
+kernel/sysproc.c
+---------------------------------
+extern uint ticks;
+
+uint64
+sys_uptime2(void)
+{
+  printf("uptime syscall called\n");
+  return ticks;
+}
+---------------------------------
+
+kernel/syscall.c
+---------------------------------
+extern uint64 sys_uptime2(void);
+---------------------------------
+
+(add to table)
+---------------------------------
+[SYS_uptime2] sys_uptime2,
+---------------------------------
+
+kernel/defs.h (if needed)
+---------------------------------
+uint64 sys_uptime2(void);
+---------------------------------
+
+-----------------------------
+USER CHANGES
+-----------------------------
+
+user/user.h
+---------------------------------
+int uptime2(void);
+---------------------------------
+
+user/usys.pl
+---------------------------------
+entry("uptime2");
+---------------------------------
+
+user/uptime2.c
+---------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int t = uptime2();
+  printf("ticks = %d\n", t);
+  exit(0);
+}
+---------------------------------
+
+Makefile
+---------------------------------
+_uptime2
+---------------------------------
+
+=====================================================
+Q4) ADD SYSCALL WITH ARGUMENT: add(int a, int b)
+=====================================================
+
+QUESTION:
+Add a syscall add(a, b) that:
+- takes two integers
+- returns their sum
+
+Write a user program addtest that prints the result.
+
+FILES TO EDIT:
+Kernel:
+- kernel/syscall.h
+- kernel/syscall.c
+- kernel/sysproc.c
+User:
+- user/user.h
+- user/usys.pl
+- user/addtest.c
+- Makefile
+
+-----------------------------
+KERNEL CHANGES
+-----------------------------
+
+kernel/syscall.h
+---------------------------------
+#define SYS_add  <next_number>
+---------------------------------
+
+kernel/sysproc.c
+---------------------------------
+uint64
+sys_add(void)
+{
+  int a, b;
+  if (argint(0, &a) < 0) return -1;
+  if (argint(1, &b) < 0) return -1;
+  return a + b;
+}
+---------------------------------
+
+kernel/syscall.c
+---------------------------------
+extern uint64 sys_add(void);
+---------------------------------
+
+(add to table)
+---------------------------------
+[SYS_add] sys_add,
+---------------------------------
+
+kernel/defs.h (if needed)
+---------------------------------
+uint64 sys_add(void);
+---------------------------------
+
+-----------------------------
+USER CHANGES
+-----------------------------
+
+user/user.h
+---------------------------------
+int add(int, int);
+---------------------------------
+
+user/usys.pl
+---------------------------------
+entry("add");
+---------------------------------
+
+user/addtest.c
+---------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if (argc != 3) {
+    printf("usage: addtest a b\n");
+    exit(1);
+  }
+
+  int a = atoi(argv[1]);
+  int b = atoi(argv[2]);
+  int r = add(a, b);
+  printf("%d\n", r);
+  exit(0);
+}
+---------------------------------
+
+Makefile
+---------------------------------
+_addtest
+---------------------------------
+
+=====================================================
+Q5) MODIFY EXISTING SYSCALL: pause() SAFETY CHECK
+=====================================================
+
+QUESTION:
+Modify pause(n) so that:
+- if n < 0, it immediately returns -1
+- otherwise behaves normally
+
+User program should print error if return value < 0.
+
+FILES TO EDIT:
+Kernel:
+- kernel/sysproc.c
+User:
+- user/sleep.c (or test program)
+
+-----------------------------
+KERNEL CHANGE
+-----------------------------
+
+kernel/sysproc.c
+(find sys_pause)
+---------------------------------
+uint64
+sys_pause(void)
+{
+  int n;
+  if (argint(0, &n) < 0)
+    return -1;
+  if (n < 0)
+    return -1;
+
+  return pause(n);
+}
+---------------------------------
+
+-----------------------------
+USER PROGRAM (example)
+-----------------------------
+
+user/sleep.c
+---------------------------------
+int r = pause(ticks);
+if (r < 0)
+  printf("invalid ticks\n");
+---------------------------------
+
+=====================================================
+END
+=====================================================
+
+Here is the formatted text for your xv6 lab solutions. I have cleaned up the code and organized the notes to make it easy to study for your quiz.
+
+1. Ping pong
+Concept: Processes communication using a shared pipe.
+Key Logic: The pipe fd acts as a one-way street. By using wait(), you ensure the parent and child take turns so they don't read their own messages.
+C
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char* argv[]) {
+    int fd[2]; // fd[0] = read, fd[1] = write
+
+    if (pipe(fd) == -1) {
+        fprintf(2, "Error: pipe(fd) error.\n");
+        exit(1);
+    }
+
+    if (fork() == 0) { // Child Process
+        char buffer[1];
+        read(fd[0], buffer, 1);
+        close(fd[0]);
+        printf("%d: received ping\n", getpid());
+        write(fd[1], buffer, 1);
+        close(fd[1]);
+    } else { // Parent Process
+        char buffer[1];
+        buffer[0] = 'a';
+        write(fd[1], buffer, 1);
+        close(fd[1]);
+        
+        // Wait for child to respond
+        read(fd[0], buffer, 1);
+        printf("%d: received pong\n", getpid());
+        close(fd[0]);
+    }
+    exit(0);
+}
+
+
+2. Primes (Sieve of Eratosthenes)
+Concept: Recursive pipelines. Each process represents a prime number and filters out its multiples.
+C
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+void new_proc(int p[2]) {
+    int prime, n;
+    close(p[1]); // Close unused write end
+    
+    if (read(p[0], &prime, 4) != 4) {
+        exit(0);
+    }
+    printf("prime %d\n", prime);
+
+    if (read(p[0], &n, 4) == 4) {
+        int newfd[2];
+        pipe(newfd);
+        
+        if (fork() != 0) { // Parent (Filter)
+            close(newfd[0]);
+            if (n % prime) write(newfd[1], &n, 4);
+            while (read(p[0], &n, 4) == 4) {
+                if (n % prime) write(newfd[1], &n, 4);
+            }
+            close(p[0]);
+            close(newfd[1]);
+            wait(0);
+        } else { // Child (Next prime in chain)
+            new_proc(newfd);
+        }
+    }
+    exit(0);
+}
+
+int main(int argc, char* argv[]) {
+    int p[2];
+    pipe(p);
+    
+    if (fork() == 0) {
+        new_proc(p);
+    } else {
+        close(p[0]);
+        for (int i = 2; i <= 35; ++i) {
+            write(p[1], &i, 4);
+        }
+        close(p[1]);
+        wait(0);
+    }
+    exit(0);
+}
+
+
+3. Find
+Concept: Recursively traversing the file system.
+Precautions:
+Avoid infinite recursion by skipping . and ...
+Folder names are strings; use strcmp, not ==.
+Read struct dirent from the directory file descriptor.
+C
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fs.h"
+#include "user/user.h"
+
+// Trims trailing spaces from file names
+char* rtrim(char* path) {
+    static char newStr[DIRSIZ+1];
+    int bufSize = 0;
+    for(int i = 0; i < DIRSIZ; i++) {
+        if(path[i] == ' ' || path[i] == '\0') break;
+        bufSize++;
+    }
+    memmove(newStr, path, bufSize);
+    newStr[bufSize] = '\0';
+    return newStr;
+}
+
+void find(char* path, char* name) {
+    char buf[512], *p;
+    int fd;
+    struct dirent de;
+    struct stat st;
+
+    if ((fd = open(path, 0)) < 0) return;
+    if (fstat(fd, &st) < 0) { close(fd); return; }
+
+    if (st.type != T_DIR) {
+        close(fd);
+        return;
+    }
+
+    strcpy(buf, path);
+    p = buf + strlen(buf);
+    *p++ = '/';
+
+    while (read(fd, &de, sizeof(de)) == sizeof de) {
+        if (de.inum == 0 || strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0)
+            continue;
+
+        memmove(p, de.name, DIRSIZ);
+        p[DIRSIZ] = '\0';
+
+        if (stat(buf, &st) < 0) continue;
+
+        if (st.type == T_DIR) {
+            find(buf, name);
+        } else if (strcmp(name, rtrim(de.name)) == 0) {
+            printf("%s\n", buf);
+        }
+    }
+    close(fd);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        fprintf(2, "Usage: find path file\n");
+        exit(1);
+    }
+    find(argv[1], argv[2]);
+    exit(0);
+}
+
+
+4. Xargs
+Concept: Converts stdin (from a pipe) into command line arguments.
+Example: echo a | xargs echo b becomes echo b a.
+C
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/param.h"
+#include "user/user.h"
+
+void xargs_exec(char* program, char** params) {
+    if (fork() == 0) {
+        exec(program, params);
+        exit(1);
+    }
+    wait(0);
+}
+
+int main(int argc, char* argv[]) {
+    char buf[1024];
+    char *params[MAXARG];
+    char *program = (argc >= 2) ? argv[1] : "echo";
+
+    // Copy original arguments (skipping 'xargs' itself)
+    int base_argc = 0;
+    for (int i = 1; i < argc; i++) {
+        params[base_argc++] = argv[i];
+    }
+
+    int m = 0;
+    while (read(0, buf + m, 1) == 1) {
+        if (buf[m] == '\n') {
+            buf[m] = '\0';
+            
+            // Add the line from stdin as the last argument
+            params[base_argc] = malloc(m + 1);
+            memmove(params[base_argc], buf, m + 1);
+            params[base_argc + 1] = 0; // Null terminate for exec
+
+            xargs_exec(program, params);
+            
+            free(params[base_argc]);
+            m = 0;
+        } else {
+            m++;
+        }
+    }
+    exit(0);
+}
+
+
+

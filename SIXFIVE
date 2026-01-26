@@ -1,0 +1,218 @@
+=====================================================
+SIXFIVE — STRAIGHTFORWARD MODIFICATIONS (ANSWERS)
+(Based on your existing sixfive answer key)
+=====================================================
+
+-----------------------------------------------------
+MOD 2 — PRINT FILENAME BEFORE EACH NUMBER
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that each printed number is prefixed
+with the filename in which it was found.
+
+Output format:
+filename:number
+
+WHAT TO CHANGE:
+Only the printf line.
+
+ORIGINAL:
+printf("%d\n", num);
+
+MODIFIED:
+printf("%s:%d\n", argv[a], num);
+
+NO OTHER CHANGES REQUIRED.
+
+-----------------------------------------------------
+MOD 3 — IGNORE NUMBERS LONGER THAN 5 DIGITS
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that numbers containing more than
+5 digits are ignored.
+
+WHAT THIS MEANS:
+- You already count digits using variable `i`
+- Only process the number if i <= 5
+
+CHANGE #1 (inside main loop, when finalising a number):
+
+ORIGINAL:
+if (i > 0 && is_sep(c) == 1)
+{
+    digits[i] = '\0';
+    int num = atoi(digits);
+
+    if (num % 5 == 0 || num % 6 == 0)
+    {
+        printf("%d\n", num);
+    }
+}
+
+MODIFIED:
+if (i > 0 && is_sep(c) == 1)
+{
+    if (i <= 5)
+    {
+        digits[i] = '\0';
+        int num = atoi(digits);
+
+        if (num % 5 == 0 || num % 6 == 0)
+        {
+            printf("%d\n", num);
+        }
+    }
+}
+
+CHANGE #2 (end-of-file flush):
+
+ORIGINAL:
+if (i > 0)
+{
+    digits[i] = '\0';
+    int num = atoi(digits);
+
+    if (num % 5 == 0 || num % 6 == 0)
+    {
+        printf("%d\n", num);
+    }
+}
+
+MODIFIED:
+if (i > 0 && i <= 5)
+{
+    digits[i] = '\0';
+    int num = atoi(digits);
+
+    if (num % 5 == 0 || num % 6 == 0)
+    {
+        printf("%d\n", num);
+    }
+}
+
+-----------------------------------------------------
+MOD 4 — ALLOW NUMBERS TO END WITH LETTERS (BUT NOT START)
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that numbers may end with letters,
+but must not start with letters.
+
+Examples:
+123abc   -> valid (prints 123)
+abc123   -> invalid (ignored)
+
+WHAT CHANGES LOGICALLY:
+- You KEEP the "do not start after letters" rule (prev logic)
+- You FINALISE number when a NON-DIGIT appears
+  (not only when is_sep(c) == 1)
+
+CHANGE #1 — MODIFY THE ELSE BLOCK CONDITION
+
+ORIGINAL:
+else
+{
+    if (i > 0 && is_sep(c) == 1)
+    {
+        digits[i] = '\0';
+        int num = atoi(digits);
+
+        if (num % 5 == 0 || num % 6 == 0)
+        {
+            printf("%d\n", num);
+        }
+    }
+    i = 0;
+}
+
+MODIFIED:
+else
+{
+    if (i > 0)
+    {
+        digits[i] = '\0';
+        int num = atoi(digits);
+
+        if (num % 5 == 0 || num % 6 == 0)
+        {
+            printf("%d\n", num);
+        }
+    }
+    i = 0;
+}
+
+IMPORTANT:
+- Do NOT remove the earlier check:
+  if (i == 0 && is_sep(prev) == 0)
+This still blocks numbers starting after letters.
+
+-----------------------------------------------------
+MOD 5 — PRINT EACH NUMBER ONLY ONCE PER FILE
+-----------------------------------------------------
+
+QUESTION:
+Modify sixfive so that each qualifying number is printed
+at most once per file.
+
+WHAT THIS MEANS:
+- You need to remember which numbers were already printed
+- Simple fixed-size array is enough
+
+ADD AT TOP OF FILE (or inside main before loop):
+-------------------------------------------------
+int seen[100];
+int seen_count = 0;
+-------------------------------------------------
+
+ADD HELPER CHECK BEFORE PRINTING:
+-------------------------------------------------
+int already_seen = 0;
+for (int s = 0; s < seen_count; s++)
+{
+    if (seen[s] == num)
+    {
+        already_seen = 1;
+        break;
+    }
+}
+-------------------------------------------------
+
+MODIFY PRINT BLOCK:
+
+ORIGINAL:
+if (num % 5 == 0 || num % 6 == 0)
+{
+    printf("%d\n", num);
+}
+
+MODIFIED:
+if (num % 5 == 0 || num % 6 == 0)
+{
+    int already_seen = 0;
+    for (int s = 0; s < seen_count; s++)
+    {
+        if (seen[s] == num)
+        {
+            already_seen = 1;
+            break;
+        }
+    }
+
+    if (!already_seen)
+    {
+        seen[seen_count++] = num;
+        printf("%d\n", num);
+    }
+}
+
+IMPORTANT:
+- Reset seen_count = 0 at the START of EACH FILE
+  (inside for (int a = 1; a < argc; a++))
+
+-----------------------------------------------------
+END
+-----------------------------------------------------
+
+

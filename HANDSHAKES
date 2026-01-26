@@ -109,3 +109,59 @@ int main(int argc, char* argv[]){
     exit(0);
 }
 
+-----------------------------------------------------------------
+SIMPLE VERSION
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p2c[2];   // parent -> child
+  int c2p[2];   // child  -> parent
+  char x;
+  char buf[1];
+
+  if (pipe(p2c) < 0 || pipe(c2p) < 0) {
+    fprintf(2, "pipe failed\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(2, "fork failed\n");
+    exit(1);
+  }
+
+  if (pid == 0) {
+    // ===== CHILD =====
+    close(p2c[1]);  // child doesn't write to p2c
+    close(c2p[0]);  // child doesn't read from c2p
+
+    read(p2c[0], buf, 1);
+    printf("%d: received %c from parent\n", getpid(), buf[0]);
+
+    write(c2p[1], buf, 1);
+
+    close(p2c[0]);
+    close(c2p[1]);
+    exit(0);
+  } else {
+    // ===== PARENT =====
+    close(p2c[0]);  // parent doesn't read from p2c
+    close(c2p[1]);  // parent doesn't write to c2p
+
+    x = 'A';
+    write(p2c[1], &x, 1);
+
+    read(c2p[0], buf, 1);
+    printf("%d: received %c from child\n", getpid(), buf[0]);
+
+    close(p2c[1]);
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}
+

@@ -1,10 +1,12 @@
-============================================================
-Q1) CAT (basic)
-Write cat1.c:
-- Usage: cat1 <file>
-- Print file contents to stdout
-- Print error if file cannot be opened
+====================================================================
+REWRITE: SAME 8 QUESTIONS, BUT NOW EACH ONE USES ARGUMENT LOGIC
+(so Gradescope can call with argv instead of hardcoded values)
+====================================================================
 
+============================================================
+Q1) CAT (basic) — already uses argv (kept, minor polish)
+Usage: cat1 <file>
+============================================================
 ANSWER (user/cat1.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
@@ -36,18 +38,18 @@ main(int argc, char *argv[])
 }
 
 ============================================================
-Q2) CAT with STDIN
-Write catstdin.c:
-- If filename given → read file
-- Else → read from stdin
-
+Q2) CAT with STDIN + MULTI FILES
+Usage:
+  catstdin            (reads stdin)
+  catstdin f1 f2 ...  (cats each file in order)
+============================================================
 ANSWER (user/catstdin.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
 
-void
+static void
 copy(int fd)
 {
   char buf[256];
@@ -62,52 +64,65 @@ main(int argc, char *argv[])
 {
   if(argc == 1){
     copy(0);
-  } else {
-    int fd = open(argv[1], 0);
+    exit(0);
+  }
+
+  for(int i = 1; i < argc; i++){
+    int fd = open(argv[i], 0);
     if(fd < 0){
-      fprintf(2, "cannot open %s\n", argv[1]);
-      exit(1);
+      fprintf(2, "catstdin: cannot open %s\n", argv[i]);
+      continue;
     }
     copy(fd);
     close(fd);
   }
+
   exit(0);
 }
 
 ============================================================
-Q3) SIMPLE I/O REDIRECTION (stdout)
-Write redirect.c:
-- Redirect stdout to file "out.txt"
-- Exec ls
-
+Q3) SIMPLE I/O REDIRECTION (stdout) — output file comes from argv
+Usage: redirect <outfile> <prog> [args...]
+Example: redirect out.txt ls -l
+============================================================
 ANSWER (user/redirect.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
 #include "kernel/stat.h"
-#include "user/user.h"
 #include "kernel/fcntl.h"
+#include "user/user.h"
 
 int
-main(void)
+main(int argc, char *argv[])
 {
-  int fd = open("out.txt", O_CREATE | O_WRONLY);
+  if(argc < 3){
+    fprintf(2, "usage: redirect outfile prog [args...]\n");
+    exit(1);
+  }
+
+  int fd = open(argv[1], O_CREATE | O_WRONLY | O_TRUNC);
+  if(fd < 0){
+    fprintf(2, "redirect: cannot open %s\n", argv[1]);
+    exit(1);
+  }
+
   close(1);
   dup(fd);
   close(fd);
 
-  char *args[] = {"ls", 0};
-  exec("ls", args);
+  // exec argv[2] with arguments starting at argv[2]
+  exec(argv[2], &argv[2]);
 
-  fprintf(2, "exec failed\n");
+  fprintf(2, "redirect: exec failed\n");
   exit(1);
 }
 
 ============================================================
-Q4) SIMPLE PIPE (one direction)
-Write pipe1.c:
-- Parent sends "hello"
-- Child prints "<pid>: hello"
-
+Q4) SIMPLE PIPE (one direction) — message comes from argv
+Usage: pipe1 <message>
+Example: pipe1 hello
+Child prints: "<childpid>: hello"
+============================================================
 ANSWER (user/pipe1.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
@@ -115,43 +130,54 @@ ANSWER (user/pipe1.c):
 #include "user/user.h"
 
 int
-main(void)
+main(int argc, char *argv[])
 {
-  int p[2];
-  char buf[16];
+  if(argc != 2){
+    fprintf(2, "usage: pipe1 message\n");
+    exit(1);
+  }
 
+  int p[2];
   pipe(p);
 
   int pid = fork();
   if(pid == 0){
     close(p[1]);
-    int n = read(p[0], buf, sizeof(buf)-1);
-    buf[n] = 0;
-    printf("%d: %s\n", getpid(), buf);
+
+    char buf[64];
+    int n = read(p[0], buf, sizeof(buf));
+    if(n > 0){
+      printf("%d: ", getpid());
+      write(1, buf, n);
+      if(buf[n-1] != '\n') write(1, "\n", 1);
+    }
+
     close(p[0]);
     exit(0);
   } else {
     close(p[0]);
-    write(p[1], "hello", 5);
+
+    // send argv[1] bytes (no null terminator needed)
+    write(p[1], argv[1], strlen(argv[1]));
     close(p[1]);
+
     wait(0);
     exit(0);
   }
 }
 
 ============================================================
-Q5) GREP (simple substring)
-Write grep1.c:
-- Usage: grep1 <pattern> <file>
-- Print lines containing pattern
-
+Q5) GREP (simple substring) — support MULTI files via argv
+Usage:
+  grep1 <pattern> <file1> [file2...]
+============================================================
 ANSWER (user/grep1.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
 
-int
+static int
 contains(char *s, char *p)
 {
   for(int i = 0; s[i]; i++){
@@ -162,20 +188,9 @@ contains(char *s, char *p)
   return 0;
 }
 
-int
-main(int argc, char *argv[])
+static void
+grep_fd(int fd, char *pattern)
 {
-  if(argc != 3){
-    fprintf(2, "usage: grep1 pattern file\n");
-    exit(1);
-  }
-
-  int fd = open(argv[2], 0);
-  if(fd < 0){
-    fprintf(2, "cannot open %s\n", argv[2]);
-    exit(1);
-  }
-
   char buf[512];
   int keep = 0, n;
 
@@ -187,74 +202,79 @@ main(int argc, char *argv[])
     for(int i = 0; i < total; i++){
       if(buf[i] == '\n'){
         buf[i] = 0;
-        if(contains(buf+start, argv[1]))
+        if(contains(buf+start, pattern))
           printf("%s\n", buf+start);
         start = i+1;
       }
     }
+
     keep = total - start;
     memmove(buf, buf+start, keep);
   }
+}
 
-  close(fd);
+int
+main(int argc, char *argv[])
+{
+  if(argc < 3){
+    fprintf(2, "usage: grep1 pattern file...\n");
+    exit(1);
+  }
+
+  char *pattern = argv[1];
+
+  for(int i = 2; i < argc; i++){
+    int fd = open(argv[i], 0);
+    if(fd < 0){
+      fprintf(2, "grep1: cannot open %s\n", argv[i]);
+      continue;
+    }
+    grep_fd(fd, pattern);
+    close(fd);
+  }
+
   exit(0);
 }
 
 ============================================================
-Q6) NUMBERS FILTER (even numbers)
-Write even.c:
-- Read integers from stdin
-- Print only even numbers
-
-ANSWER (user/even.c):
+Q6) NUMBERS FILTER (even) — take numbers from argv (multi nums)
+Usage: evenM n1 n2 n3 ...
+Print only even numbers
+============================================================
+ANSWER (user/evenM.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
-#include "kernel/stat.h"
 #include "user/user.h"
 
 int
-atoi(char *s)
+main(int argc, char *argv[])
 {
-  int n = 0;
-  while(*s){
-    n = n * 10 + (*s - '0');
-    s++;
+  if(argc < 2){
+    fprintf(2, "usage: evenM nums...\n");
+    exit(1);
   }
-  return n;
-}
 
-int
-main(void)
-{
-  char buf[64];
-  int i = 0, n;
-
-  while(read(0, &buf[i], 1) == 1){
-    if(buf[i] == '\n'){
-      buf[i] = 0;
-      n = atoi(buf);
-      if(n % 2 == 0)
-        printf("%d\n", n);
-      i = 0;
-    } else {
-      i++;
-    }
+  for(int i = 1; i < argc; i++){
+    int n = atoi(argv[i]);
+    if(n % 2 == 0)
+      printf("%d\n", n);
   }
+
   exit(0);
 }
 
 ============================================================
-Q7) PRIMES (simple sieve-style filter)
-Write primes1.c:
-- Print primes from 2 to 35 using fork + pipe
-
+Q7) PRIMES (sieve) — range comes from argv
+Usage: primes1 <start> <end>
+Example: primes1 2 35
+============================================================
 ANSWER (user/primes1.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
 
-void
+static void
 primes(int fd)
 {
   int p;
@@ -283,8 +303,16 @@ primes(int fd)
 }
 
 int
-main(void)
+main(int argc, char *argv[])
 {
+  if(argc != 3){
+    fprintf(2, "usage: primes1 start end\n");
+    exit(1);
+  }
+
+  int start = atoi(argv[1]);
+  int end   = atoi(argv[2]);
+
   int p[2];
   pipe(p);
 
@@ -293,20 +321,21 @@ main(void)
     primes(p[0]);
   } else {
     close(p[0]);
-    for(int i = 2; i <= 35; i++)
+    for(int i = start; i <= end; i++)
       write(p[1], &i, sizeof(int));
     close(p[1]);
     wait(0);
   }
+
   exit(0);
 }
 
 ============================================================
-Q8) FORK ONLY
-Write fork1.c:
-- Child prints its PID
-- Parent prints its PID and child PID
-
+Q8) FORK ONLY — count comes from argv
+Usage: fork1 N
+Fork N children. Each child prints its pid.
+Parent prints its pid and each child pid returned by fork().
+============================================================
 ANSWER (user/fork1.c):
 ------------------------------------------------------------
 #include "kernel/types.h"
@@ -314,15 +343,37 @@ ANSWER (user/fork1.c):
 #include "user/user.h"
 
 int
-main(void)
+main(int argc, char *argv[])
 {
-  int pid = fork();
-  if(pid == 0){
-    printf("child pid=%d\n", getpid());
-    exit(0);
-  } else {
-    printf("parent pid=%d child=%d\n", getpid(), pid);
-    wait(0);
-    exit(0);
+  if(argc != 2){
+    fprintf(2, "usage: fork1 N\n");
+    exit(1);
   }
+
+  int N = atoi(argv[1]);
+
+  printf("parent pid=%d\n", getpid());
+
+  for(int i = 0; i < N; i++){
+    int pid = fork();
+    if(pid == 0){
+      printf("child pid=%d\n", getpid());
+      exit(0);
+    } else if(pid > 0){
+      printf("fork returned child=%d\n", pid);
+    } else {
+      fprintf(2, "fork failed\n");
+      break;
+    }
+  }
+
+  // reap children
+  for(int i = 0; i < N; i++)
+    wait(0);
+
+  exit(0);
 }
+
+====================================================================
+END (ALL NOW USE argv INPUT IN A GRADESCOPE-FRIENDLY WAY)
+====================================================================

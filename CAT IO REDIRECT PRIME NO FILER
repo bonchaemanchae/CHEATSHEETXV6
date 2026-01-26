@@ -1,0 +1,328 @@
+============================================================
+Q1) CAT (basic)
+Write cat1.c:
+- Usage: cat1 <file>
+- Print file contents to stdout
+- Print error if file cannot be opened
+
+ANSWER (user/cat1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 2){
+    fprintf(2, "usage: cat1 file\n");
+    exit(1);
+  }
+
+  int fd = open(argv[1], 0);
+  if(fd < 0){
+    fprintf(2, "cat1: cannot open %s\n", argv[1]);
+    exit(1);
+  }
+
+  char buf[256];
+  int n;
+  while((n = read(fd, buf, sizeof(buf))) > 0){
+    write(1, buf, n);
+  }
+
+  close(fd);
+  exit(0);
+}
+
+============================================================
+Q2) CAT with STDIN
+Write catstdin.c:
+- If filename given → read file
+- Else → read from stdin
+
+ANSWER (user/catstdin.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+void
+copy(int fd)
+{
+  char buf[256];
+  int n;
+  while((n = read(fd, buf, sizeof(buf))) > 0){
+    write(1, buf, n);
+  }
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc == 1){
+    copy(0);
+  } else {
+    int fd = open(argv[1], 0);
+    if(fd < 0){
+      fprintf(2, "cannot open %s\n", argv[1]);
+      exit(1);
+    }
+    copy(fd);
+    close(fd);
+  }
+  exit(0);
+}
+
+============================================================
+Q3) SIMPLE I/O REDIRECTION (stdout)
+Write redirect.c:
+- Redirect stdout to file "out.txt"
+- Exec ls
+
+ANSWER (user/redirect.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fcntl.h"
+
+int
+main(void)
+{
+  int fd = open("out.txt", O_CREATE | O_WRONLY);
+  close(1);
+  dup(fd);
+  close(fd);
+
+  char *args[] = {"ls", 0};
+  exec("ls", args);
+
+  fprintf(2, "exec failed\n");
+  exit(1);
+}
+
+============================================================
+Q4) SIMPLE PIPE (one direction)
+Write pipe1.c:
+- Parent sends "hello"
+- Child prints "<pid>: hello"
+
+ANSWER (user/pipe1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int p[2];
+  char buf[16];
+
+  pipe(p);
+
+  int pid = fork();
+  if(pid == 0){
+    close(p[1]);
+    int n = read(p[0], buf, sizeof(buf)-1);
+    buf[n] = 0;
+    printf("%d: %s\n", getpid(), buf);
+    close(p[0]);
+    exit(0);
+  } else {
+    close(p[0]);
+    write(p[1], "hello", 5);
+    close(p[1]);
+    wait(0);
+    exit(0);
+  }
+}
+
+============================================================
+Q5) GREP (simple substring)
+Write grep1.c:
+- Usage: grep1 <pattern> <file>
+- Print lines containing pattern
+
+ANSWER (user/grep1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+contains(char *s, char *p)
+{
+  for(int i = 0; s[i]; i++){
+    int j = 0;
+    while(p[j] && s[i+j] == p[j]) j++;
+    if(p[j] == 0) return 1;
+  }
+  return 0;
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 3){
+    fprintf(2, "usage: grep1 pattern file\n");
+    exit(1);
+  }
+
+  int fd = open(argv[2], 0);
+  if(fd < 0){
+    fprintf(2, "cannot open %s\n", argv[2]);
+    exit(1);
+  }
+
+  char buf[512];
+  int keep = 0, n;
+
+  while((n = read(fd, buf+keep, sizeof(buf)-keep-1)) > 0){
+    int total = keep + n;
+    buf[total] = 0;
+
+    int start = 0;
+    for(int i = 0; i < total; i++){
+      if(buf[i] == '\n'){
+        buf[i] = 0;
+        if(contains(buf+start, argv[1]))
+          printf("%s\n", buf+start);
+        start = i+1;
+      }
+    }
+    keep = total - start;
+    memmove(buf, buf+start, keep);
+  }
+
+  close(fd);
+  exit(0);
+}
+
+============================================================
+Q6) NUMBERS FILTER (even numbers)
+Write even.c:
+- Read integers from stdin
+- Print only even numbers
+
+ANSWER (user/even.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+atoi(char *s)
+{
+  int n = 0;
+  while(*s){
+    n = n * 10 + (*s - '0');
+    s++;
+  }
+  return n;
+}
+
+int
+main(void)
+{
+  char buf[64];
+  int i = 0, n;
+
+  while(read(0, &buf[i], 1) == 1){
+    if(buf[i] == '\n'){
+      buf[i] = 0;
+      n = atoi(buf);
+      if(n % 2 == 0)
+        printf("%d\n", n);
+      i = 0;
+    } else {
+      i++;
+    }
+  }
+  exit(0);
+}
+
+============================================================
+Q7) PRIMES (simple sieve-style filter)
+Write primes1.c:
+- Print primes from 2 to 35 using fork + pipe
+
+ANSWER (user/primes1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+void
+primes(int fd)
+{
+  int p;
+  if(read(fd, &p, sizeof(int)) == 0)
+    exit(0);
+
+  printf("prime %d\n", p);
+
+  int n;
+  int p2[2];
+  pipe(p2);
+
+  if(fork() == 0){
+    close(p2[1]);
+    primes(p2[0]);
+  } else {
+    close(p2[0]);
+    while(read(fd, &n, sizeof(int)) > 0){
+      if(n % p != 0)
+        write(p2[1], &n, sizeof(int));
+    }
+    close(p2[1]);
+    wait(0);
+    exit(0);
+  }
+}
+
+int
+main(void)
+{
+  int p[2];
+  pipe(p);
+
+  if(fork() == 0){
+    close(p[1]);
+    primes(p[0]);
+  } else {
+    close(p[0]);
+    for(int i = 2; i <= 35; i++)
+      write(p[1], &i, sizeof(int));
+    close(p[1]);
+    wait(0);
+  }
+  exit(0);
+}
+
+============================================================
+Q8) FORK ONLY
+Write fork1.c:
+- Child prints its PID
+- Parent prints its PID and child PID
+
+ANSWER (user/fork1.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int pid = fork();
+  if(pid == 0){
+    printf("child pid=%d\n", getpid());
+    exit(0);
+  } else {
+    printf("parent pid=%d child=%d\n", getpid(), pid);
+    wait(0);
+    exit(0);
+  }
+}

@@ -1,0 +1,202 @@
+====================================================================
+XV6 MOCK LAB SET (3 QUESTIONS) — GETPPID SYSCALL + (1) BASIC (2) PIPE (3) EXEC
+====================================================================
+
+NOTE:
+- xv6 does NOT have getppid() by default.
+- So ALL 3 questions assume you must ADD getppid() syscall first.
+
+====================================================================
+COMMON PART (REQUIRED FOR ALL 3 QUESTIONS)
+ADD A NEW SYSCALL: getppid()
+====================================================================
+
+KERNEL FILES TO EDIT (EXACT LIST):
+1) kernel/sysproc.c      -> implement sys_getppid()
+2) kernel/syscall.h      -> add SYS_getppid number
+3) kernel/syscall.c      -> register sys_getppid in syscall table
+
+USER FILES TO EDIT (EXACT LIST):
+4) user/user.h           -> declare int getppid(void);
+5) user/usys.pl          -> add entry("getppid");
+
+(OPTIONAL) Add test programs:
+6) user/<program>.c
+
+----------------------------
+COMMON ANSWER CODE (GETPPID)
+----------------------------
+
+(1) kernel/sysproc.c  (ADD THIS FUNCTION)
+------------------------------------------------------------
+#include "types.h"
+#include "riscv.h"
+#include "defs.h"
+#include "param.h"
+#include "memlayout.h"
+#include "spinlock.h"
+#include "proc.h"
+
+uint64
+sys_getppid(void)
+{
+  struct proc *p = myproc();
+  if(p->parent)
+    return p->parent->pid;
+  return 0;
+}
+
+(2) kernel/syscall.h  (ADD A SYS NUMBER)
+------------------------------------------------------------
+#define SYS_getppid  XX
+// Use the next free syscall number in YOUR syscall.h.
+
+(3) kernel/syscall.c  (REGISTER IT)
+------------------------------------------------------------
+extern uint64 sys_getppid(void);
+
+static uint64 (*syscalls[])(void) = {
+  ...
+  [SYS_getppid] sys_getppid,
+};
+
+(4) user/user.h  (DECLARE)
+------------------------------------------------------------
+int getppid(void);
+
+(5) user/usys.pl  (ADD STUB GENERATION)
+------------------------------------------------------------
+entry("getppid");
+
+After this:
+- make clean
+- make qemu
+
+====================================================================
+QUESTION 1 (BASIC): PRINT CHILD PID + PARENT PPID
+====================================================================
+
+TASK:
+Write a user program q1_basic.c that:
+- fork()
+- CHILD prints: "child pid=<...> parent pid=<...>"
+- PARENT waits and prints nothing
+
+ANSWER (user/q1_basic.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int pid = fork();
+  if(pid == 0){
+    printf("child pid=%d parent pid=%d\n", getpid(), getppid());
+    exit(0);
+  } else {
+    wait(0);
+    exit(0);
+  }
+}
+
+====================================================================
+QUESTION 2 (PIPE): CHILD SENDS PID+PPID THROUGH A PIPE
+====================================================================
+
+TASK:
+Write a user program q2_pipe.c that:
+- parent creates pipe
+- fork()
+- child computes (pid, ppid) and writes BOTH as integers to pipe
+- parent reads and prints: "child pid=<...> parent pid=<...>"
+- parent waits before exiting
+
+ANSWER (user/q2_pipe.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int p[2];
+  pipe(p);
+
+  int pid = fork();
+
+  if(pid == 0){
+    // child
+    close(p[0]); // close read end
+
+    int info[2];
+    info[0] = getpid();
+    info[1] = getppid();
+
+    write(p[1], info, sizeof(info));
+    close(p[1]);
+    exit(0);
+
+  } else {
+    // parent
+    close(p[1]); // close write end
+
+    int info[2];
+    read(p[0], info, sizeof(info));
+    close(p[0]);
+
+    printf("child pid=%d parent pid=%d\n", info[0], info[1]);
+
+    wait(0);
+    exit(0);
+  }
+}
+
+====================================================================
+QUESTION 3 (EXEC): CHILD EXECS A PROGRAM THAT PRINTS PID+PPID
+====================================================================
+
+TASK:
+Write TWO user programs:
+A) q3_parent.c:
+   - fork()
+   - child execs "q3_childprog"
+   - parent waits
+
+B) q3_childprog.c:
+   - prints: "child pid=<...> parent pid=<...>"
+
+ANSWER A (user/q3_parent.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int pid = fork();
+  if(pid == 0){
+    char *args[] = {"q3_childprog", 0};
+    exec("q3_childprog", args);
+    exit(1);
+  } else {
+    wait(0);
+    exit(0);
+  }
+}
+
+ANSWER B (user/q3_childprog.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  printf("child pid=%d parent pid=%d\n", getpid(), getppid());
+  exit(0);
+}
+
+====================================================================
+END OF MOCK LAB SET
+====================================================================

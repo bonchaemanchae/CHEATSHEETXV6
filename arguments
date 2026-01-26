@@ -3,6 +3,11 @@ XV6 ARGUMENT HANDLING — 5 CORE TEMPLATES (NO FLAGS)
 + EXPANDED “HOW YOU USE IT” EXPLANATIONS
 ====================================================================
 
+for (int i = 1; i < argc; i++) {
+    printf("%s\n", argv[i]);
+}
+
+
 BIG IDEA (LOCK THIS IN):
 - argv[] is an array of strings.
 - Each argv[i] is one “token” the user typed.

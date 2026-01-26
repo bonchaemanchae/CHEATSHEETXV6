@@ -164,4 +164,69 @@ main(int argc, char *argv[])
     exit(0);
   }
 }
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+User types something → parent sends it to child → child replies
+What’s happening
 
+Parent reads from stdin (fd 0) into a buffer
+
+Parent writes that buffer into p2c[1]
+
+Child read(p2c[0]) into its buffer, prints, then writes reply into c2p[1]
+
+Parent read(c2p[0]) and prints reply
+
+Minimal example (string message)
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main() {
+  int p2c[2], c2p[2];
+  char buf[64];
+
+  pipe(p2c);
+  pipe(c2p);
+
+  int pid = fork();
+  if(pid == 0){
+    // child: read from parent, then reply
+    close(p2c[1]);
+    close(c2p[0]);
+
+    int n = read(p2c[0], buf, sizeof(buf));
+    if(n > 0){
+      // print what child got
+      printf("%d: child got: %s\n", getpid(), buf);
+      // reply
+      write(c2p[1], "pong\n", 5);
+    }
+
+    close(p2c[0]);
+    close(c2p[1]);
+    exit(0);
+  } else {
+    // parent: get input from user, then send to child
+    close(p2c[0]);
+    close(c2p[1]);
+
+    printf("Type a message: ");
+    int n = read(0, buf, sizeof(buf)-1); // stdin is fd 0
+    if(n > 0){
+      buf[n] = 0; // make it a C string (null-terminate)
+      write(p2c[1], buf, n+1); // send including '\0' so child can print as %s
+    }
+
+    // wait reply
+    int m = read(c2p[0], buf, sizeof(buf)-1);
+    if(m > 0){
+      buf[m] = 0;
+      printf("%d: parent got: %s\n", getpid(), buf);
+    }
+
+    close(p2c[1]);
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}

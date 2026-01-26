@@ -1,0 +1,819 @@
+XV6 (User-space) Lab-Style Practice Set — Questions + Code Answers
+(ALL COPY-PASTEABLE. Each Q has a matching “Answer code”.)
+
+============================================================
+Q1) PINGPONG (1-byte handshake)
+Write a user program pingpong.c:
+- Parent sends 1 byte "p" to child, child prints "<pid>: received ping"
+- Child sends 1 byte back, parent prints "<pid>: received pong"
+- Use TWO pipes (p2c, c2p). Close unused ends properly.
+
+ANSWER (user/pingpong.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p2c[2], c2p[2];
+  char x = 'p';
+
+  if(pipe(p2c) < 0 || pipe(c2p) < 0){
+    fprintf(2, "pipe failed\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if(pid < 0){
+    fprintf(2, "fork failed\n");
+    exit(1);
+  }
+
+  if(pid == 0){
+    // child: read from parent, write back
+    close(p2c[1]);
+    close(c2p[0]);
+
+    read(p2c[0], &x, 1);
+    printf("%d: received ping\n", getpid());
+    write(c2p[1], &x, 1);
+
+    close(p2c[0]);
+    close(c2p[1]);
+    exit(0);
+  } else {
+    // parent: write to child, read back
+    close(p2c[0]);
+    close(c2p[1]);
+
+    write(p2c[1], &x, 1);
+    read(c2p[0], &x, 1);
+    printf("%d: received pong\n", getpid());
+
+    close(p2c[1]);
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}
+
+============================================================
+Q2) HANDSHAKE STRING (user types message)
+Write handshake.c:
+- Parent prompts user, reads a line from stdin, sends it to child via pipe
+- Child prints "child got: <message>" and replies "OK\n"
+- Parent prints "parent got: OK"
+(Use two pipes; send null-terminated string.)
+
+ANSWER (user/handshake.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p2c[2], c2p[2];
+  char buf[128];
+
+  pipe(p2c);
+  pipe(c2p);
+
+  int pid = fork();
+  if(pid < 0){
+    fprintf(2, "fork failed\n");
+    exit(1);
+  }
+
+  if(pid == 0){
+    close(p2c[1]);
+    close(c2p[0]);
+
+    int n = read(p2c[0], buf, sizeof(buf)-1);
+    if(n > 0){
+      buf[n] = 0;
+      printf("child got: %s", buf);
+      write(c2p[1], "OK\n", 3);
+    }
+
+    close(p2c[0]);
+    close(c2p[1]);
+    exit(0);
+  } else {
+    close(p2c[0]);
+    close(c2p[1]);
+
+    printf("Type a message: ");
+    int n = read(0, buf, sizeof(buf)-1);
+    if(n > 0){
+      buf[n] = 0;
+      // include terminating 0 so child can safely print as %s
+      write(p2c[1], buf, n+1);
+    }
+    close(p2c[1]);
+
+    int m = read(c2p[0], buf, sizeof(buf)-1);
+    if(m > 0){
+      buf[m] = 0;
+      printf("parent got: %s", buf);
+    }
+
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}
+
+============================================================
+Q3) IO REDIRECTION + EXEC (child becomes `cat`)
+Write execpipe.c:
+- Parent writes "hello\n" into child’s stdin
+- Child execs "cat" so it echoes to stdout
+- Parent reads the echoed output and prints "parent saw: <text>"
+(Hint: close(0); dup(p2c[0]); close(1); dup(c2p[1]); then exec.)
+
+ANSWER (user/execpipe.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p2c[2], c2p[2];
+  char buf[128];
+
+  pipe(p2c);
+  pipe(c2p);
+
+  int pid = fork();
+  if(pid < 0){
+    fprintf(2, "fork failed\n");
+    exit(1);
+  }
+
+  if(pid == 0){
+    close(p2c[1]);
+    close(c2p[0]);
+
+    // stdin <- p2c[0]
+    close(0);
+    dup(p2c[0]);
+    close(p2c[0]);
+
+    // stdout -> c2p[1]
+    close(1);
+    dup(c2p[1]);
+    close(c2p[1]);
+
+    char *args[] = {"cat", 0};
+    exec("cat", args);
+
+    fprintf(2, "exec cat failed\n");
+    exit(1);
+  } else {
+    close(p2c[0]);
+    close(c2p[1]);
+
+    write(p2c[1], "hello\n", 6);
+    close(p2c[1]); // important: EOF so cat can finish
+
+    int n = read(c2p[0], buf, sizeof(buf)-1);
+    if(n > 0){
+      buf[n] = 0;
+      printf("parent saw: %s", buf);
+    }
+
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}
+
+============================================================
+Q4) SIMPLE “FIND” (recursive)
+Implement find.c:
+Usage: find <path> <name>
+- Recursively search from <path> for entries whose filename equals <name>
+- Print full path for each match.
+(Use: open, read (dirents), fstat, strcmp, fmtname helper.)
+
+ANSWER (user/find.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fs.h"
+
+static char*
+fmtname(char *path)
+{
+  static char buf[DIRSIZ+1];
+  char *p;
+
+  for(p = path + strlen(path); p >= path && *p != '/'; p--)
+    ;
+  p++;
+
+  if(strlen(p) >= DIRSIZ)
+    return p;
+
+  memmove(buf, p, strlen(p));
+  buf[strlen(p)] = 0;
+  return buf;
+}
+
+void
+find(char *path, char *target)
+{
+  char buf[512], *p;
+  int fd;
+  struct dirent de;
+  struct stat st;
+
+  if((fd = open(path, 0)) < 0){
+    fprintf(2, "find: cannot open %s\n", path);
+    return;
+  }
+
+  if(fstat(fd, &st) < 0){
+    fprintf(2, "find: cannot stat %s\n", path);
+    close(fd);
+    return;
+  }
+
+  if(st.type == T_FILE){
+    if(strcmp(fmtname(path), target) == 0)
+      printf("%s\n", path);
+    close(fd);
+    return;
+  }
+
+  if(st.type != T_DIR){
+    close(fd);
+    return;
+  }
+
+  if(strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)){
+    fprintf(2, "find: path too long\n");
+    close(fd);
+    return;
+  }
+
+  strcpy(buf, path);
+  p = buf + strlen(buf);
+  *p++ = '/';
+
+  while(read(fd, &de, sizeof(de)) == sizeof(de)){
+    if(de.inum == 0) continue;
+    if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+
+    memmove(p, de.name, DIRSIZ);
+    p[DIRSIZ] = 0;
+
+    find(buf, target);
+  }
+
+  close(fd);
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 3){
+    fprintf(2, "usage: find path name\n");
+    exit(1);
+  }
+  find(argv[1], argv[2]);
+  exit(0);
+}
+
+============================================================
+Q5) XARGS (basic)
+Implement xargs.c:
+Usage: xargs <cmd> [args...]
+- Read stdin lines
+- For each line, run <cmd> with original args plus the line as extra args
+Example: echo hello | xargs echo  -> prints "hello"
+(Use fork+exec+wait. Keep it simple: split line by spaces.)
+
+ANSWER (user/xargs.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/param.h"
+#include "user/user.h"
+
+static int
+readline(char *buf, int max)
+{
+  int i = 0;
+  char c;
+  while(i < max-1){
+    int n = read(0, &c, 1);
+    if(n < 1) break;
+    if(c == '\n') break;
+    buf[i++] = c;
+  }
+  buf[i] = 0;
+  return i;
+}
+
+static int
+split(char *s, char *out[], int max)
+{
+  int k = 0;
+  while(*s){
+    while(*s == ' ') s++;
+    if(*s == 0) break;
+    if(k >= max) break;
+    out[k++] = s;
+    while(*s && *s != ' ') s++;
+    if(*s){
+      *s = 0;
+      s++;
+    }
+  }
+  return k;
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: xargs cmd [args...]\n");
+    exit(1);
+  }
+
+  char line[256];
+  char *exec_argv[MAXARG];
+  int base = 0;
+
+  // copy base argv (cmd + args)
+  for(int i = 1; i < argc; i++){
+    exec_argv[base++] = argv[i];
+  }
+
+  while(1){
+    int len = readline(line, sizeof(line));
+    if(len == 0 && line[0] == 0) break;
+
+    char *extra[32];
+    int exn = split(line, extra, 32);
+
+    int k = base;
+    for(int i = 0; i < exn && k < MAXARG-1; i++){
+      exec_argv[k++] = extra[i];
+    }
+    exec_argv[k] = 0;
+
+    int pid = fork();
+    if(pid == 0){
+      exec(exec_argv[0], exec_argv);
+      fprintf(2, "xargs: exec failed\n");
+      exit(1);
+    } else {
+      wait(0);
+    }
+  }
+
+  exit(0);
+}
+
+============================================================
+Q6) “PIPELINE” DEMO (two execs)
+Write pipeline.c:
+- Create pipe
+- Left child execs "echo" to write "hi"
+- Right child execs "cat" to read and print it
+- Parent waits both
+(This is the minimal shell-pipeline idea.)
+
+ANSWER (user/pipeline.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p[2];
+  pipe(p);
+
+  int left = fork();
+  if(left == 0){
+    // left: stdout -> pipe write
+    close(p[0]);
+    close(1);
+    dup(p[1]);
+    close(p[1]);
+
+    char *args[] = {"echo", "hi", 0};
+    exec("echo", args);
+    fprintf(2, "exec echo failed\n");
+    exit(1);
+  }
+
+  int right = fork();
+  if(right == 0){
+    // right: stdin <- pipe read
+    close(p[1]);
+    close(0);
+    dup(p[0]);
+    close(p[0]);
+
+    char *args[] = {"cat", 0};
+    exec("cat", args);
+    fprintf(2, "exec cat failed\n");
+    exit(1);
+  }
+
+  close(p[0]);
+  close(p[1]);
+  wait(0);
+  wait(0);
+  exit(0);
+}
+
+============================================================
+Q7) “WHY DOES THIS BLOCK?” (close bug)
+Given the handshake (2 pipes), explain the bug:
+- Parent writes then reads
+- Child reads then writes
+But the program sometimes blocks forever.
+Fix in code: missing close of unused write end(s).
+
+ANSWER (buggy + fixed snippet):
+------------------------------------------------------------
+Bug pattern:
+- parent forgets close(p2c[1]) after writing OR child keeps p2c[1] open
+=> reader may never see EOF / waits for more data.
+
+Fixed idea (in parent after sending):
+  write(p2c[1], &x, 1);
+  close(p2c[1]);   // CLOSE WRITE END SO READER CAN FINISH
+
+Also ensure child closes p2c[1] immediately:
+  close(p2c[1]);
+
+============================================================
+Q8) “ECHO-REPLY” worker via exec (custom)
+Write worker.c:
+- Reads stdin, prints "worker saw: <line>"
+- Then prints "pong\n"
+Then write launcher.c:
+- Parent redirects worker stdin/stdout using pipes
+- Parent sends "ping\n"
+- Parent reads back "worker saw: ping" and "pong"
+
+ANSWER (user/worker.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  char buf[128];
+  int n = read(0, buf, sizeof(buf)-1);
+  if(n > 0){
+    buf[n] = 0;
+    printf("worker saw: %s", buf);
+    printf("pong\n");
+  }
+  exit(0);
+}
+
+ANSWER (user/launcher.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p2c[2], c2p[2];
+  char buf[256];
+
+  pipe(p2c);
+  pipe(c2p);
+
+  int pid = fork();
+  if(pid == 0){
+    close(p2c[1]);
+    close(c2p[0]);
+
+    close(0); dup(p2c[0]); close(p2c[0]);
+    close(1); dup(c2p[1]); close(c2p[1]);
+
+    char *args[] = {"worker", 0};
+    exec("worker", args);
+    fprintf(2, "exec worker failed\n");
+    exit(1);
+  } else {
+    close(p2c[0]);
+    close(c2p[1]);
+
+    write(p2c[1], "ping\n", 5);
+    close(p2c[1]);
+
+    int n = read(c2p[0], buf, sizeof(buf)-1);
+    if(n > 0){
+      buf[n] = 0;
+      printf("parent got:\n%s", buf);
+    }
+
+    close(c2p[0]);
+    wait(0);
+    exit(0);
+  }
+}
+
+============================================================
+Q9) “STDIN DEFAULT” understanding
+Write stdin_cat.c:
+- If a filename is given, open it and copy to stdout
+- If no filename, read from stdin (fd 0) and copy to stdout
+(This mimics cat behaviour.)
+
+ANSWER (user/stdin_cat.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+static void
+copyfd(int in)
+{
+  char buf[256];
+  int n;
+  while((n = read(in, buf, sizeof(buf))) > 0){
+    write(1, buf, n);
+  }
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc == 1){
+    copyfd(0);
+    exit(0);
+  }
+
+  int fd = open(argv[1], 0);
+  if(fd < 0){
+    fprintf(2, "cannot open %s\n", argv[1]);
+    exit(1);
+  }
+  copyfd(fd);
+  close(fd);
+  exit(0);
+}
+
+============================================================
+Q10) “MINI GREP” (string contains)
+Write grepmini.c:
+Usage: grepmini <pattern> [file]
+- If file given: read file, print lines containing pattern
+- If no file: read stdin
+(You can keep pattern match simple: strstr.)
+
+ANSWER (user/grepmini.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+static int
+contains(char *s, char *pat)
+{
+  int n = strlen(pat);
+  if(n == 0) return 1;
+  for(int i = 0; s[i]; i++){
+    int j = 0;
+    while(pat[j] && s[i+j] && s[i+j] == pat[j]) j++;
+    if(pat[j] == 0) return 1;
+  }
+  return 0;
+}
+
+static void
+grepfd(int fd, char *pat)
+{
+  char buf[512];
+  int m = 0;
+  int n;
+
+  while((n = read(fd, buf+m, sizeof(buf)-m-1)) > 0){
+    int total = m + n;
+    buf[total] = 0;
+
+    int start = 0;
+    for(int i = 0; i < total; i++){
+      if(buf[i] == '\n'){
+        buf[i] = 0;
+        if(contains(buf+start, pat)){
+          printf("%s\n", buf+start);
+        }
+        start = i+1;
+      }
+    }
+
+    // move leftover partial line to front
+    m = total - start;
+    memmove(buf, buf+start, m);
+  }
+
+  // print last line if no trailing newline
+  if(m > 0){
+    buf[m] = 0;
+    if(contains(buf, pat)) printf("%s\n", buf);
+  }
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: grepmini pattern [file]\n");
+    exit(1);
+  }
+  char *pat = argv[1];
+
+  if(argc == 2){
+    grepfd(0, pat);
+    exit(0);
+  }
+
+  int fd = open(argv[2], 0);
+  if(fd < 0){
+    fprintf(2, "cannot open %s\n", argv[2]);
+    exit(1);
+  }
+  grepfd(fd, pat);
+  close(fd);
+  exit(0);
+}
+
+============================================================
+Q11) “FIND + EXEC” (like: find . name then run cat)
+Write findexec.c:
+Usage: findexec <path> <name> <prog>
+- For every match, fork+exec <prog> <fullpath>
+Example: findexec . README cat
+
+ANSWER (user/findexec.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fs.h"
+
+static char*
+fmtname(char *path)
+{
+  static char buf[DIRSIZ+1];
+  char *p;
+  for(p = path + strlen(path); p >= path && *p != '/'; p--) ;
+  p++;
+  if(strlen(p) >= DIRSIZ) return p;
+  memmove(buf, p, strlen(p));
+  buf[strlen(p)] = 0;
+  return buf;
+}
+
+void
+walk(char *path, char *target, char *prog)
+{
+  char buf[512], *p;
+  int fd;
+  struct dirent de;
+  struct stat st;
+
+  if((fd = open(path, 0)) < 0) return;
+  if(fstat(fd, &st) < 0){ close(fd); return; }
+
+  if(st.type == T_FILE){
+    if(strcmp(fmtname(path), target) == 0){
+      int pid = fork();
+      if(pid == 0){
+        char *args[] = {prog, path, 0};
+        exec(prog, args);
+        fprintf(2, "exec failed\n");
+        exit(1);
+      }
+      wait(0);
+    }
+    close(fd);
+    return;
+  }
+
+  if(st.type != T_DIR){ close(fd); return; }
+
+  if(strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)){ close(fd); return; }
+  strcpy(buf, path);
+  p = buf + strlen(buf);
+  *p++ = '/';
+
+  while(read(fd, &de, sizeof(de)) == sizeof(de)){
+    if(de.inum == 0) continue;
+    if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+    memmove(p, de.name, DIRSIZ);
+    p[DIRSIZ] = 0;
+    walk(buf, target, prog);
+  }
+
+  close(fd);
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc != 4){
+    fprintf(2, "usage: findexec path name prog\n");
+    exit(1);
+  }
+  walk(argv[1], argv[2], argv[3]);
+  exit(0);
+}
+
+============================================================
+Q12) “PIPE + XARGS” combo (concept test)
+Given:
+  find . txt | xargs cat
+Explain what happens at a high level, and write user code that mimics:
+- read lines from stdin
+- for each line exec cat <line>
+
+ANSWER (core xargs loop snippet):
+------------------------------------------------------------
+while(readline(line, sizeof(line))){
+  char *args[] = {"cat", line, 0};
+  if(fork() == 0){
+    exec("cat", args);
+    exit(1);
+  }
+  wait(0);
+}
+
+============================================================
+Q13) “ORDERING LOGIC” (deadlock check)
+You have two pipes. Decide if deadlock happens:
+A) Parent read then write; Child read then write
+B) Parent write then read; Child read then write
+C) Parent write then read; Child write then read
+Explain briefly.
+
+ANSWER:
+------------------------------------------------------------
+A) Deadlock likely: both start with read -> both block, nobody writes.
+B) Safe: parent writes first, child reads first -> handshake works.
+C) Usually safe for small writes: both write first, then both read.
+   But conceptually messy; with large data could block if pipe buffers fill.
+
+============================================================
+Q14) “WHY CLOSE UNUSED ENDS?” (1-liner exam)
+State ONE reason why each process must close unused pipe ends after fork.
+
+ANSWER:
+------------------------------------------------------------
+Because if any write end remains open, the reader may never see EOF and can block forever waiting for more data.
+
+============================================================
+Q15) “MINI SHELL RUN ONE COMMAND”
+Write runsimple.c:
+- Parent forks
+- Child execs argv[1]
+- Parent waits
+Usage: runsimple ls
+
+ANSWER (user/runsimple.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: runsimple cmd [args...]\n");
+    exit(1);
+  }
+
+  int pid = fork();
+  if(pid == 0){
+    exec(argv[1], &argv[1]);
+    fprintf(2, "exec failed\n");
+    exit(1);
+  }
+  wait(0);
+  exit(0);
+}

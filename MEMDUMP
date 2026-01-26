@@ -1,218 +1,161 @@
-MOD 1 — CHANGE RETURN VALUE + KERNEL PRINT MESSAGE
+=====================================================
+MEMDUMP — STRAIGHTFORWARD MODIFICATIONS (ANSWERS)
+(Based on your existing Lab 1 memdump answer key)
+=====================================================
+
+BASELINE (what your memdump already does)
+- Reads memory using a format string
+- Uses pointer `p` to walk through data
+- Supported formats:
+  c  -> 1 byte char
+  h  -> 2 byte short
+  i  -> 4 byte int
+  p  -> 8 byte pointer printed as hex
+  s  -> 8 byte address, print string at that address
+  S  -> print string starting at p, then STOP
+
+-----------------------------------------------------
+MOD 1 — ADD FORMAT 'u' (UNSIGNED 4-BYTE INTEGER)
 -----------------------------------------------------
 
 QUESTION:
-Modify hello() so that it:
-1) prints "Hello from kernel syscall!"
-2) returns 1012
-
-FILES TO EDIT:
-- kernel/sysproc.c   (sys_hello)
-(NO other file needed if syscall already exists)
-
-ANSWER (kernel/sysproc.c):
------------------------------------------------------
-uint64
-sys_hello(void)
-{
-  printf("Hello from kernel syscall!\n");
-  return 1012;
-}
------------------------------------------------------
-
-user/hello.c can stay as:
------------------------------------------------------
-#include "kernel/types.h"
-#include "user/user.h"
-
-int
-main(void)
-{
-  int r = hello();
-  printf("hello returned %d\n", r);
-  exit(0);
-}
------------------------------------------------------
-
------------------------------------------------------
-MOD 2 — ADD A SECOND SYSCALL: goodbye()
------------------------------------------------------
-
-QUESTION:
-Add a new syscall goodbye() that:
-- prints "Goodbye from kernel syscall!"
-- returns 0
-Write user program goodbye that prints:
-  goodbye returned <value>
-
-FILES TO EDIT / ADD:
-Kernel:
-- kernel/syscall.h
-- kernel/syscall.c
-- kernel/sysproc.c
-(+ kernel/defs.h if your tree requires prototypes)
-User:
-- user/user.h
-- user/usys.pl
-- user/goodbye.c (new)
-- Makefile (add _goodbye)
-
-ANSWER STEPS + SNIPPETS:
-
-(1) kernel/syscall.h
-Add a new syscall number:
------------------------------------------------------
-#define SYS_goodbye  <next_available_number>
------------------------------------------------------
-
-(2) kernel/sysproc.c
-Implement handler:
------------------------------------------------------
-uint64
-sys_goodbye(void)
-{
-  printf("Goodbye from kernel syscall!\n");
-  return 0;
-}
------------------------------------------------------
-
-(3) kernel/syscall.c
-Add extern declaration:
------------------------------------------------------
-extern uint64 sys_goodbye(void);
------------------------------------------------------
-
-Add to syscall table:
------------------------------------------------------
-[SYS_goodbye] sys_goodbye,
------------------------------------------------------
-
-(4) user/user.h
-Add prototype:
------------------------------------------------------
-int goodbye(void);
------------------------------------------------------
-
-(5) user/usys.pl
-Add entry:
------------------------------------------------------
-entry("goodbye");
------------------------------------------------------
-
-(6) user/goodbye.c (new file)
------------------------------------------------------
-#include "kernel/types.h"
-#include "user/user.h"
-
-int
-main(void)
-{
-  int r = goodbye();
-  printf("goodbye returned %d\n", r);
-  exit(0);
-}
------------------------------------------------------
-
-(7) Makefile
-Add program to UPROGS list:
------------------------------------------------------
-_goodbye
------------------------------------------------------
-
------------------------------------------------------
-MOD 3 — HELLO PRINTS PID TOO (ONLY IF ASKED)
------------------------------------------------------
-
-QUESTION:
-Modify hello() so that it prints:
-  Hello from kernel syscall! pid=<pid>
-and returns 0.
-
-FILES TO EDIT:
-- kernel/sysproc.c
-
-ANSWER (kernel/sysproc.c):
-NOTE: pid access depends on your tree. Common xv6 pattern:
------------------------------------------------------
-uint64
-sys_hello(void)
-{
-  printf("Hello from kernel syscall! pid=%d\n", myproc()->pid);
-  return 0;
-}
------------------------------------------------------
-
-If myproc() not in scope in that file, the tree will usually already
-have a way to get current process (the lab will not ask pid if not).
-
------------------------------------------------------
-MOD 4 — USER PROGRAM CHANGES ONLY (NO KERNEL EDITS)
------------------------------------------------------
-
-QUESTION:
-Modify user/hello.c so it:
-- calls hello()
-- prints "kernel said: <returnvalue>"
+Extend memdump so that format character 'u' reads
+4 bytes from memory and prints them as an UNSIGNED
+decimal integer.
 
 FILES:
-- user/hello.c only
+- user/memdump.c
 
-ANSWER (user/hello.c):
+ADD THIS CASE INSIDE memdump() SWITCH:
 -----------------------------------------------------
-#include "kernel/types.h"
-#include "user/user.h"
-
-int
-main(void)
+case 'u':
 {
-  int r = hello();
-  printf("kernel said: %d\n", r);
-  exit(0);
+    uint value;
+    memmove(&value, p, 4);
+    printf("%u\n", value);
+    p += 4;
+    break;
 }
 -----------------------------------------------------
 
+NO OTHER CHANGES REQUIRED.
+
 -----------------------------------------------------
-MOD 5 — HELLO TAKES ONE ARGUMENT (ADVANCED, ONLY IF ASKED)
+MOD 2 — ADD "0x" PREFIX TO POINTER OUTPUT ('p')
 -----------------------------------------------------
 
 QUESTION:
-Change hello to accept an int argument n from user program:
-  int hello(int n);
-Kernel prints n and returns n+1.
+Modify memdump so that pointer output includes a
+"0x" prefix before the hexadecimal digits.
 
-FILES (changes syscall signature):
-User:
-- user/user.h
-- user/usys.pl (usually needs arg handling in xv6 calling convention)
-Kernel:
-- kernel/sysproc.c (use argint to read syscall arg)
+FILES:
+- user/memdump.c
 
-NOTE:
-This is MORE complex and only asked if your lab taught syscall args.
+MODIFY case 'p':
 
-KERNEL HANDLER SHAPE (kernel/sysproc.c):
+ORIGINAL (simplified):
 -----------------------------------------------------
-uint64
-sys_hello(void)
-{
+for (int i = 7; i >= 0; i--) {
+    unsigned char b = (v >> (i * 8)) & 0xff;
+    printf("%c", hex[b >> 4]);
+    printf("%c", hex[b & 0x0f]);
+}
+printf("\n");
+-----------------------------------------------------
 
-  int n;
-  if (argint(0, &n) < 0)
-    return -1;
-  printf("hello got %d\n", n);
-  return n + 1;
+MODIFIED:
+-----------------------------------------------------
+printf("0x");
+for (int i = 7; i >= 0; i--) {
+    unsigned char b = (v >> (i * 8)) & 0xff;
+    printf("%c", hex[b >> 4]);
+    printf("%c", hex[b & 0x0f]);
+}
+printf("\n");
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 3 — CHANGE 'S' SO IT CONTINUES INSTEAD OF STOPPING
+-----------------------------------------------------
+
+QUESTION:
+Modify memdump so that format 'S':
+- prints the string starting at p
+- advances p past the null terminator
+- continues processing the remaining format characters
+
+FILES:
+- user/memdump.c
+
+ORIGINAL:
+-----------------------------------------------------
+case 'S':
+{
+    printf("%s\n", p);
+    return;
 }
 -----------------------------------------------------
 
-USER PROGRAM SHAPE:
+MODIFIED:
 -----------------------------------------------------
-int n = atoi(argv[1]);
-int r = hello(n);
-printf("%d\n", r);
+case 'S':
+{
+    printf("%s\n", p);
+    p += strlen(p) + 1;
+    break;
+}
 -----------------------------------------------------
 
-(Only include this mod in cheatsheet if your lab covered syscall args.)
+-----------------------------------------------------
+MOD 4 — ADD FORMAT 'b' (PRINT RAW BYTE AS DECIMAL)
+-----------------------------------------------------
+
+QUESTION:
+Extend memdump with format character 'b':
+- reads 1 byte
+- prints its UNSIGNED decimal value (0–255)
+
+FILES:
+- user/memdump.c
+
+ADD THIS CASE:
+-----------------------------------------------------
+case 'b':
+{
+    unsigned char v = *(unsigned char *)p;
+    printf("%d\n", v);
+    p += 1;
+    break;
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 5 — IGNORE UNKNOWN FORMAT CHARACTERS
+-----------------------------------------------------
+
+QUESTION:
+Modify memdump so that unknown format characters
+are ignored instead of doing nothing silently.
+
+Behavior:
+- Print:
+  unknown format: X
+- Continue processing remaining format characters
+
+FILES:
+- user/memdump.c
+
+MODIFY default CASE:
+-----------------------------------------------------
+default:
+{
+    printf("unknown format: %c\n", fmt[i]);
+    break;
+}
+-----------------------------------------------------
 
 -----------------------------------------------------
 END
---------------------------------------------------
+-----------------------------------------------------
+
+

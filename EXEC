@@ -1,0 +1,180 @@
+====================================================================
+XV6 MOCK LAB QUESTIONS — EXEC / FORK / PIPE (ALL-IN-ONE TEXTBOX)
+(Realistic, exam-/lab-style, not braindead)
+====================================================================
+
+====================================================================
+QUESTION 0 — EXEC ONLY (NO FORK)
+====================================================================
+
+TASK:
+Write a user program execonly.c that:
+- directly replaces itself with the program "echo"
+- prints the message "hello xv6"
+
+REQUIREMENTS:
+- Do NOT use fork()
+- Use exec() correctly
+- Construct argv properly
+
+EXPECTED BEHAVIOUR:
+Running execonly prints:
+hello xv6
+
+------------------------------------------------------------
+ANSWER (execonly.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  char *argv[] = {"echo", "hello xv6", 0};
+  exec("echo", argv);
+
+  // only runs if exec fails
+  exit(1);
+}
+
+====================================================================
+QUESTION 1 — FORK + EXEC + ARGUMENT PASSING
+====================================================================
+
+TASK:
+Write a user program runls.c that:
+- forks a child process
+- the CHILD execs "ls" with argument "-l"
+- the PARENT waits for the child
+
+EXPECTED BEHAVIOUR:
+Output is the same as running:
+ls -l
+
+------------------------------------------------------------
+ANSWER (runls.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int pid = fork();
+
+  if(pid == 0){
+    char *argv[] = {"ls", "-l", 0};
+    exec("ls", argv);
+    exit(1);
+  } else {
+    wait(0);
+    exit(0);
+  }
+}
+
+====================================================================
+QUESTION 2 — PIPE + EXEC (ls | wc)
+====================================================================
+
+TASK:
+Write a user program pipels.c that behaves like:
+ls | wc
+
+REQUIREMENTS:
+- Use ONE pipe
+- Use fork() twice
+- Redirect stdout of ls into stdin of wc
+- Use exec() for both programs
+
+------------------------------------------------------------
+ANSWER (pipels.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int p[2];
+  pipe(p);
+
+  // child 1: ls
+  if(fork() == 0){
+    close(1);
+    dup(p[1]);
+    close(p[0]);
+    close(p[1]);
+
+    char *argv[] = {"ls", 0};
+    exec("ls", argv);
+    exit(1);
+  }
+
+  // child 2: wc
+  if(fork() == 0){
+    close(0);
+    dup(p[0]);
+    close(p[0]);
+    close(p[1]);
+
+    char *argv[] = {"wc", 0};
+    exec("wc", argv);
+    exit(1);
+  }
+
+  close(p[0]);
+  close(p[1]);
+  wait(0);
+  wait(0);
+  exit(0);
+}
+
+====================================================================
+QUESTION 3 — EXEC FAILURE HANDLING
+====================================================================
+
+TASK:
+Write a user program tryexec.c that:
+- forks a child
+- child attempts to exec a non-existent program "nope"
+- if exec fails, child prints its PID
+- parent waits and prints "child done"
+
+------------------------------------------------------------
+ANSWER (tryexec.c):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(void)
+{
+  int pid = fork();
+
+  if(pid == 0){
+    char *argv[] = {"nope", 0};
+    exec("nope", argv);
+
+    // exec only returns on failure
+    printf("exec failed, pid=%d\n", getpid());
+    exit(1);
+  } else {
+    wait(0);
+    printf("child done\n");
+    exit(0);
+  }
+}
+
+====================================================================
+KEY REMINDERS (LAB SAFE)
+====================================================================
+
+- exec() NEVER returns on success
+- argv MUST end with 0
+- argv[0] is the program name by convention
+- fork() creates a new process, exec() replaces it
+- pipes require close() of unused ends or programs will hang
+
+====================================================================
+END OF TEXTBOX
+====================================================================

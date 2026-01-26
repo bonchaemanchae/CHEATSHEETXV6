@@ -1,0 +1,403 @@
+=====================================================
+XARGS — COURSE-REALISTIC MODIFICATIONS
+(FULL QUESTION + EXAMPLE + EXACT CODE EDITS)
+Based on your working xargs answer key
+=====================================================
+
+NOTE:
+In all mods below, the only file is usually:
+- user/xargs.c
+(and Makefile only if you add a NEW program name)
+
+-----------------------------------------------------
+MOD 1 — WHITESPACE: SUPPORT TABS + MULTI-SPACES
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that it treats both SPACE and TAB as separators.
+Multiple spaces/tabs should be ignored.
+
+Example:
+Command:
+  xargs echo
+Input:
+  a\tb   c
+Expected exec argv:
+  echo a b c
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+
+(1) Skip spaces
+
+ORIGINAL:
+  while (*ptr == ' ') ptr++;
+
+REPLACE WITH:
+  while (*ptr == ' ' || *ptr == '\t') ptr++;
+
+(2) Find end of a word
+
+ORIGINAL:
+  while (*ptr && *ptr != ' ') ptr++;
+
+REPLACE WITH:
+  while (*ptr && *ptr != ' ' && *ptr != '\t') ptr++;
+
+Done.
+
+-----------------------------------------------------
+MOD 2 — PER-LINE EXECUTION (NO CROSS-LINE BATCHING)
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that it executes EXACTLY ONCE per input line.
+Tokens from different lines must NOT be combined.
+
+Example:
+Command:
+  xargs echo
+Input:
+  1 2
+  3 4 5
+Expected executions:
+  echo 1 2
+  echo 3 4 5
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+
+Your current code batches across lines because arg_idx / new_args
+keep increasing.
+
+A) RESET AT START OF EACH LINE
+
+Add at the START of each line (inside while(fetch_line...)):
+
+  arg_idx = fixed_count;
+  new_args = 0;
+
+Example:
+-----------------------------------------------------
+while (fetch_line(input_line)) {
+  arg_idx = fixed_count;
+  new_args = 0;
+  char *ptr = input_line;
+  ...
+}
+-----------------------------------------------------
+
+B) EXEC ONCE AFTER TOKENIZING THE LINE
+
+Add AFTER tokenization, before next fetch_line:
+
+-----------------------------------------------------
+if (new_args > 0) {
+  exec_args[arg_idx] = 0;
+  if (fork() == 0) {
+    exec(exec_args[0], exec_args);
+    exit(1);
+  }
+  wait(0);
+  for (int k = fixed_count; k < arg_idx; k++)
+    free(exec_args[k]);
+}
+-----------------------------------------------------
+
+C) REMOVE old batching-by-limit logic
+
+Delete or ignore:
+-----------------------------------------------------
+if (limit != -1 && new_args == limit) { ... }
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 3 — IGNORE BLANK / WHITESPACE-ONLY LINES
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that blank lines (or lines with only spaces/tabs)
+do not execute the command.
+
+Example:
+Input:
+  <blank>
+  a b
+
+Expected:
+  (no exec for blank)
+  exec for "a b"
+
+FILES:
+- user/xargs.c
+
+ANSWER:
+If MOD 2 is implemented:
+- blank line ⇒ new_args == 0 ⇒ no exec
+
+Otherwise:
+- guard final exec with:
+  if (new_args > 0) { ... }
+
+-----------------------------------------------------
+MOD 4 — ADD FLAG: -t TRACE
+-----------------------------------------------------
+
+FULL QUESTION:
+Add support for flag -t.
+When -t is used, xargs prints the full argv
+BEFORE each exec.
+
+Example:
+Command:
+  xargs -t echo A
+Input:
+  1 2
+
+Expected trace:
+  echo A 1 2
+(then actual output)
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+
+A) ADD FLAG VARIABLE:
+-----------------------------------------------------
+int trace = 0;
+-----------------------------------------------------
+
+B) PARSE -t FLAG:
+-----------------------------------------------------
+if (argv[1] == "-t") {
+  trace = 1;
+  start_at = 2;
+}
+-----------------------------------------------------
+
+C) PRINT TRACE BEFORE EXEC (IN ALL EXEC LOCATIONS):
+-----------------------------------------------------
+if (trace) {
+  for (int i = 0; exec_args[i] != 0; i++) {
+    if (i) printf(" ");
+    printf("%s", exec_args[i]);
+  }
+  printf("\n");
+}
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 5 — CHANGE INPUT SPLIT RULE: ONE TOKEN PER LINE
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that each input line is treated as ONE argument
+(including spaces inside the line).
+
+Example:
+Command:
+  xargs echo
+Input:
+  hello world
+
+Expected execution:
+  echo "hello world"
+
+FILES:
+- user/xargs.c
+
+ANSWER (EXACT CHANGES):
+
+Replace tokenization logic with:
+-----------------------------------------------------
+exec_args[fixed_count] = malloc(strlen(input_line) + 1);
+strcpy(exec_args[fixed_count], input_line);
+exec_args[fixed_count + 1] = 0;
+
+fork / exec / wait
+
+free(exec_args[fixed_count]);
+-----------------------------------------------------
+
+Meaning:
+- DO NOT split by spaces
+- Treat entire line as one token
+
+-----------------------------------------------------
+MOD 6 — STOP AFTER K EXECUTIONS (-m K)
+-----------------------------------------------------
+
+FULL QUESTION:
+Add support for -m K so xargs executes at most K times total.
+
+Example:
+Command:
+  xargs -m 2 echo
+Input:
+  1
+  2
+  3
+
+Expected:
+  echo 1
+  echo 2
+(stop; ignore remaining)
+
+FILES:
+- user/xargs.c
+
+ANSWER:
+
+A) PARSE FLAG:
+-----------------------------------------------------
+int maxruns = -1;
+if ("-m K" present) {
+  maxruns = atoi(K);
+  start_at += 2;
+}
+-----------------------------------------------------
+
+B) TRACK RUN COUNT:
+-----------------------------------------------------
+int runs = 0;
+-----------------------------------------------------
+
+C) AFTER EACH EXEC:
+-----------------------------------------------------
+runs++;
+if (maxruns != -1 && runs >= maxruns)
+  break;
+-----------------------------------------------------
+
+-----------------------------------------------------
+MOD 7 — HANDLE TOO MANY ARGS (MAXARG SAFETY)
+-----------------------------------------------------
+
+FULL QUESTION:
+Modify xargs so it never exceeds MAXARG arguments.
+If adding another token would exceed MAXARG-1,
+execute current batch first, then continue.
+
+FILES:
+- user/xargs.c
+
+ANSWER:
+
+Before adding a new token:
+-----------------------------------------------------
+if (arg_idx >= MAXARG - 1) {
+  // exec current batch
+  // free stdin-added args
+  arg_idx = fixed_count;
+  new_args = 0;
+}
+-----------------------------------------------------
+
+Then add token normally.
+
+-----------------------------------------------------
+MOD 8 — N-1 VARIANTS (REFERENCE)
+-----------------------------------------------------
+
+If they say:
+  "-n limits stdin args only"
+→ new_args == limit   (NO N-1)
+
+If they say:
+  "-n limits total exec args"
+→ allowed = limit - fixed_count   (YES N-1)
+
+=====================================================
+WHAT TYPES OF XARGS QUESTIONS YOUR COURSE LIKELY USES
+=====================================================
+
+Most likely:
+- MOD 1 (tabs / whitespace)
+- MOD 2 (per-line exec)
+- MOD 4 (trace)
+- MOD 7 (MAXARG safety)
+- N-1 wording flip (stdin-only vs total-exec)
+
+Less likely unless taught:
+- quoting support ("two words")
+
+=====================================================
+XARGS — N-1 RULE MODIFICATIONS
+=====================================================
+
+---------------------------------------------
+MOD A — REMOVE THE “N-1” RULE
+---------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that when -n N is provided,
+N limits ONLY the number of arguments read from stdin.
+
+Example:
+Command:
+  xargs -n 3 echo A
+Input:
+  1 2 3 4 5 6
+
+Expected:
+  echo A 1 2 3
+  echo A 4 5 6
+
+ANSWER:
+Keep batching condition:
+-----------------------------------------------------
+if (limit != -1 && new_args == limit)
+-----------------------------------------------------
+
+DO NOT subtract fixed_count.
+DO NOT create allowed = limit - fixed_count.
+
+---------------------------------------------
+MOD B — ENFORCE THE “N-1” RULE
+---------------------------------------------
+
+FULL QUESTION:
+Modify xargs so that -n N limits TOTAL arguments passed to exec.
+
+Example:
+Command:
+  xargs -n 3 echo A
+
+ANSWER:
+
+After fixed args are counted:
+-----------------------------------------------------
+int allowed = limit;
+if (limit != -1) {
+  allowed = limit - fixed_count;
+  if (allowed < 1) allowed = 1;
+}
+-----------------------------------------------------
+
+Replace trigger:
+-----------------------------------------------------
+if (limit != -1 && new_args == allowed)
+-----------------------------------------------------
+
+---------------------------------------------
+MOD C — HOW TO TELL WHICH RULE TO USE
+---------------------------------------------
+
+If question says:
+  "-n limits arguments read from stdin"
+→ NO N-1
+
+If question says:
+  "-n limits arguments passed to exec"
+→ YES N-1
+
+=====================================================
+END (XARGS SECTION ONLY)
+=====================================================
+
+

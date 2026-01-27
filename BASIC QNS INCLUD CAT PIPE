@@ -1,0 +1,233 @@
+====================================================================
+XV6 MOCK EXAM QUESTIONS (ALL USE ARG PASSING: argc/argv)
+(CODING-STYLE PROMPTS ONLY — you write the code)
+====================================================================
+
+-------------------------
+Q1) Reverse ONE string
+-------------------------
+Write user/rev.c
+Usage: rev <string>
+Example: rev hello123
+Output: 321olleh
+Rules:
+- argc must be 2, else print usage to fd 2 and exit(1)
+- Reverse argv[1] and print to stdout
+
+-------------------------
+Q2) Reverse EACH argument
+-------------------------
+Write user/revargs.c
+Usage: revargs <a1> <a2> ... <aN>
+Example: revargs red blue green
+Output:
+der
+eulb
+neerg
+Rules:
+- argc must be >= 2
+- For each argv[i] (i>=1), reverse it and print on its own line
+
+-------------------------
+Q3) Swap TWO arguments
+-------------------------
+Write user/swap.c
+Usage: swap <a> <b>
+Example: swap red blue
+Output: blue red
+Rules:
+- argc must be 3 else usage error
+- Print argv[2] then argv[1]
+
+-------------------------
+Q4) Count user arguments
+-------------------------
+Write user/count.c
+Usage: count <a1> <a2> ... <aN>
+Example: count a b c
+Output: 3
+Rules:
+- Print (argc - 1) as an integer
+
+-------------------------
+Q5) Sum integers
+-------------------------
+Write user/sum.c
+Usage: sum <n1> <n2> ... <nN>
+Example: sum 10 20 30
+Output: 60
+Rules:
+- argc must be >= 2
+- Use atoi(argv[i]) and sum them
+
+-------------------------
+Q6) Max integer
+-------------------------
+Write user/max.c
+Usage: max <n1> <n2> ... <nN>
+Example: max 4 9 2 7
+Output: 9
+Rules:
+- argc must be >= 2
+- Compute maximum of atoi(argv[i])
+
+-------------------------
+Q7) CAT basic (one file)
+-------------------------
+Write user/cat1.c
+Usage: cat1 <file>
+Example: cat1 README
+Output: (file contents)
+Rules:
+- open(argv[1], O_RDONLY)
+- read/write loop to stdout
+- on open fail, print error to fd 2 and exit(1)
+
+-------------------------
+Q8) CAT multiple files
+-------------------------
+Write user/catM.c
+Usage: catM <f1> <f2> ... <fN>
+Example: catM a.txt b.txt
+Rules:
+- For each file argv[i], open+copy to stdout
+- If one file fails to open, print error and continue to next
+
+-------------------------
+Q9) Copy file (cp)
+-------------------------
+Write user/cp1.c
+Usage: cp1 <src> <dst>
+Example: cp1 a.txt out.txt
+Rules:
+- open src read-only
+- open dst with O_CREATE|O_WRONLY|O_TRUNC
+- copy bytes from src to dst
+
+-------------------------
+Q10) Append text to file
+-------------------------
+Write user/append.c
+Usage: append <file> <text>
+Example: append out.txt hello
+Rules:
+- open file with O_CREATE|O_WRONLY (append behavior: just write; xv6 may not have O_APPEND)
+- Write argv[2] and "\n" to the file
+
+-------------------------
+Q11) Lines in file
+-------------------------
+Write user/lines.c
+Usage: lines <file>
+Example: lines a.txt
+Output: <number_of_lines>
+Rules:
+- open file O_RDONLY
+- count '\n' occurrences and print count
+
+-------------------------
+Q12) GREP simple substring (multi files)
+-------------------------
+Write user/grep1.c
+Usage: grep1 <pattern> <file1> [file2...]
+Example: grep1 foo a.txt b.txt
+Rules:
+- For each file argv[i], print lines containing argv[1]
+- (substring match is enough)
+- handle lines split across reads
+
+-------------------------
+Q13) SIMPLE PIPE message from argv
+-------------------------
+Write user/pipe1.c
+Usage: pipe1 <message>
+Example: pipe1 hello
+Rules:
+- Create one pipe, fork
+- Parent writes argv[1] to pipe then closes write end
+- Child reads from pipe and prints "<childpid>: <message>"
+
+-------------------------
+Q14) HANDSHAKE with mode argument
+-------------------------
+Write user/handshake.c
+Usage:
+  handshake ping      (parent sends first)
+  handshake           (child sends first)
+Rules:
+- If argv[1] is "ping" and argc==2 -> parent writes "ping" first
+- Otherwise child writes "ping" first
+- Use two pipes p2c and c2p
+- Print what each side receives
+
+-------------------------
+Q15) FORK N children (N from argv)
+-------------------------
+Write user/forkn.c
+Usage: forkn <N>
+Example: forkn 3
+Rules:
+- Parent prints its pid
+- Fork N children
+- Each child prints "child pid=<pid>"
+- Parent wait() N times
+
+-------------------------
+Q16) EXEC wrapper (run command)
+-------------------------
+Write user/run.c
+Usage: run <prog> [args...]
+Example: run ls -l
+Rules:
+- exec(argv[1], &argv[1])
+- If exec fails, print error to fd 2 and exit(1)
+
+-------------------------
+Q17) EXEC each argument (runEach)
+-------------------------
+Write user/runEach.c
+Usage: runEach <prog> <item1> <item2> ...
+Example: runEach ls dir1 dir2
+Rules:
+- For each item argv[i] (i>=2), fork then exec:
+    prog item
+- Parent waits after each (sequential) OR waits at end (either ok unless spec says)
+
+-------------------------
+Q18) REDIRECT stdout to file using argv
+-------------------------
+Write user/redirect.c
+Usage: redirect <outfile> <prog> [args...]
+Example: redirect out.txt ls
+Rules:
+- open outfile with O_CREATE|O_WRONLY|O_TRUNC
+- close(1); dup(fd); close(fd)
+- exec(argv[2], &argv[2])
+
+-------------------------
+Q19) FIND-style: search each root for target name
+-------------------------
+Write user/myfind.c
+Usage: myfind <root1> [root2...] <target>
+Example: myfind dirA dirB hello.txt
+Rules:
+- target is last argument argv[argc-1]
+- For each root argv[1..argc-2], recursively search for filename == target
+- Print full path for matches
+- Must skip "." and ".."
+
+-------------------------
+Q20) “echo -n” flag parsing (argv config)
+-------------------------
+Write user/echo2.c
+Usage:
+  echo2 <words...>
+  echo2 -n <words...>
+Rules:
+- If first arg is "-n", don’t print trailing newline
+- Otherwise print newline
+- Always space-separate words
+
+====================================================================
+END
+====================================================================

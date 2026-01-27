@@ -1,0 +1,168 @@
+==============================
+XV6 BASIC SYSTEM CALL CHEATSHEET
+==============================
+
+1) echo (arguments + stdout)
+----------------------------
+Code:
+#include "kernel/types.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+  for(int i = 1; i < argc; i++)
+    printf("%s ", argv[i]);
+  printf("\n");
+  exit(0);
+}
+
+Explanation:
+Prints command-line arguments to stdout (FD 1).
+
+------------------------------------------------
+
+2) File Descriptors (FD)
+-----------------------
+FD 0 = stdin (keyboard)
+FD 1 = stdout (screen)
+FD 2 = stderr (errors)
+
+Code:
+char buf[5];
+read(0, buf, 5);
+write(1, buf, 5);
+
+
+Explanation:
+read() and write() use file descriptors to do I/O.
+int read(int fd, void *buf, int n);
+int write(int fd, void *buf, int n);
+
+------------------------------------------------
+
+
+
+
+3) fork() (create process)
+--------------------------
+Code:
+int pid = fork();
+
+if (pid == 0) {
+  // child
+} else {
+  // parent
+}
+
+
+Explanation:
+fork() duplicates the process.
+Child gets 0, parent gets child PID.
+
+------------------------------------------------
+
+4) exec() (run another program)
+-------------------------------
+Code:
+char *args[] = { "echo", "hi", 0 };
+exec("echo", args);
+
+Explanation:
+Replaces the current program with a new one.
+PID stays the same.
+
+------------------------------------------------
+
+5) pipe() (parent → child communication)
+----------------------------------------
+Code:
+int fd[2];
+char c;
+
+pipe(fd);
+
+if (fork() == 0) {
+  close(fd[1]);        // child doesn't write
+  read(fd[0], buf, 1);
+  exit(0);
+} else {
+  close(fd[0]);        // parent doesn't read
+  write(fd[1], "A", 1);
+  wait(0);
+}
+
+}
+
+Explanation:
+pipe() creates a kernel buffer.
+Parent writes to fd[1], child reads from fd[0].
+
+------------------------------------------------
+
+6) pipe() with close() (correct usage)
+-------------------------------------
+Code:
+int fd[2];
+pipe(fd);   
+
+//NOW fd[0] = READ end of pipe
+//fd[1] = WRITE end of pipe
+
+if(fork() == 0){
+  close(fd[1]);        // child does not write
+  read(fd[0], buf, 1);
+  exit(0);
+} else {
+  close(fd[0]);        // parent does not read
+  write(fd[1], buf, 1);
+  wait(0);
+}
+
+Explanation:
+Close unused pipe ends to prevent blocking.
+
+------------------------------------------------
+
+7) fork + exec (run utility in child)
+------------------------------------
+Code:
+if(fork() == 0){
+  exec("ls", (char*[]){"ls", 0});
+}
+wait(0);
+
+Explanation:
+Parent creates child, child runs a new program.
+
+------------------------------------------------
+
+8) xargs (concept)
+------------------
+Code idea:
+read(0, buf, n);
+fork();
+exec(cmd, args);
+
+Explanation:
+xargs reads input, builds arguments, then forks and execs.
+
+------------------------------------------------
+
+9) exit() and wait()
+-------------------
+Code:
+exit(0);    // terminate current process
+wait(0);    // parent waits for child
+
+Explanation:
+Child must exit, parent must wait to clean up.
+
+------------------------------------------------
+
+MASTER SUMMARY
+--------------
+fork() creates processes
+pipe() lets processes communicate
+exec() runs another program
+FDs control all I/O
+
+

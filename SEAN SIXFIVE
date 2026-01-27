@@ -1,0 +1,68 @@
+#include "kernel/types.h"
+#include "kernel/fcntl.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (argc < 2)
+    {
+        printf("Add your file\n");
+        exit(1);
+    }
+
+    int fd;
+    char buf[512];
+    char c;
+    int idx;
+    char *sep = " -\r\t\n./,";
+
+    for (int i = 1; i < argc; i++)
+    {
+        idx = 0;
+
+        if ((fd = open(argv[i], O_RDONLY)) < 0)   
+        {
+            printf("Cannot open file %s\n", argv[i]);
+            continue;
+        }
+
+        while (read(fd, &c, 1) == 1)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                buf[idx++] = c;
+            }
+            else if (strchr(sep, c))
+            {
+                if (idx > 0)
+                {
+                    buf[idx] = '\0';
+                    int num = atoi(buf);
+
+                    if (num % 5 == 0 || num % 6 == 0)
+                    {
+                        printf("%d\n", num);
+                    }
+
+                    idx = 0;
+                }
+            }
+        }
+
+        // handle number at EOF for THIS file
+        if (idx > 0)
+        {
+            buf[idx] = '\0';
+            int num = atoi(buf);
+            if (num % 5 == 0 || num % 6 == 0)
+            {
+                printf("%d\n", num);
+            }
+        }
+
+        close(fd);
+    }
+
+    exit(0); 
+}

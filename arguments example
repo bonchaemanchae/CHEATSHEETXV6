@@ -1,0 +1,299 @@
+====================================================================
+XV6 MULTI-ARGUMENT LAB EXAMPLES (COPY/PASTE SET)
+Focus: multiple argv inputs used in “real logic”
+Topics: fork, exec, pipes/fd, find-style, simple file ops
+(NO stdin parsing; all input is argv)
+====================================================================
+
+------------------------------------------------------------
+EXAMPLE 1) “ECHO MANY” — print all args (multi-argv baseline)
+Usage: echoM a b c
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: echoM words...\n");
+    exit(1);
+  }
+
+  for(int i = 1; i < argc; i++){
+    printf("%s", argv[i]);
+    if(i + 1 < argc) printf(" ");
+  }
+  printf("\n");
+  exit(0);
+}
+
+------------------------------------------------------------
+EXAMPLE 2) “SUM MANY NUMBERS” — atoi each arg
+Usage: sumM 10 20 30
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: sumM nums...\n");
+    exit(1);
+  }
+
+  int total = 0;
+  for(int i = 1; i < argc; i++){
+    total += atoi(argv[i]);
+  }
+  printf("%d\n", total);
+  exit(0);
+}
+
+------------------------------------------------------------
+EXAMPLE 3) “CAT MANY FILES” — each argv[i] is a filename
+Usage: catM a.txt b.txt
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: catM file...\n");
+    exit(1);
+  }
+
+  char buf[512];
+  for(int i = 1; i < argc; i++){
+    int fd = open(argv[i], 0);
+    if(fd < 0){
+      fprintf(2, "catM: cannot open %s\n", argv[i]);
+      continue;
+    }
+
+    int n;
+    while((n = read(fd, buf, sizeof(buf))) > 0){
+      write(1, buf, n);
+    }
+    close(fd);
+  }
+
+  exit(0);
+}
+
+------------------------------------------------------------
+EXAMPLE 4) “FORK PER ARG” — one child handles one argument
+Usage: forkEach a b c
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+static void
+work(char *s)
+{
+  // pretend “work” is expensive; this is where you’d do logic
+  printf("%d: work on %s\n", getpid(), s);
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 2){
+    fprintf(2, "usage: forkEach items...\n");
+    exit(1);
+  }
+
+  for(int i = 1; i < argc; i++){
+    int pid = fork();
+    if(pid == 0){
+      work(argv[i]);
+      exit(0);
+    }
+  }
+
+  for(int i = 1; i < argc; i++){
+    wait(0);
+  }
+  exit(0);
+}
+
+------------------------------------------------------------
+EXAMPLE 5) “EXEC MANY” — run the same program for each arg
+Usage: runEach ls dir1 dir2 dir3
+Meaning: run "ls dir1", then "ls dir2", ...
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 3){
+    fprintf(2, "usage: runEach prog arg...\n");
+    exit(1);
+  }
+
+  char *prog = argv[1];
+
+  for(int i = 2; i < argc; i++){
+    int pid = fork();
+    if(pid == 0){
+      char *args[] = { prog, argv[i], 0 };
+      exec(prog, args);
+      fprintf(2, "exec failed\n");
+      exit(1);
+    }
+    wait(0); // run sequentially (safer for labs)
+  }
+
+  exit(0);
+}
+
+------------------------------------------------------------
+EXAMPLE 6) “PIPE + EXEC PER ARG” — feed one arg into a child’s stdin
+Usage: feedEach wc hello world
+Meaning: for each word, run wc and pipe the word into wc’s stdin
+(Shows pipe + fd redirection + argv loop)
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 3){
+    fprintf(2, "usage: feedEach prog items...\n");
+    exit(1);
+  }
+
+  char *prog = argv[1];
+
+  for(int i = 2; i < argc; i++){
+    int p[2];
+    pipe(p);
+
+    int pid = fork();
+    if(pid == 0){
+      // child: stdin <- p[0]
+      close(p[1]);
+      close(0);
+      dup(p[0]);
+      close(p[0]);
+
+      char *args[] = { prog, 0 };
+      exec(prog, args);
+      fprintf(2, "exec failed\n");
+      exit(1);
+    } else {
+      // parent: write item into pipe, then close to send EOF
+      close(p[0]);
+      write(p[1], argv[i], strlen(argv[i]));
+      write(p[1], "\n", 1);
+      close(p[1]);
+      wait(0);
+    }
+  }
+
+  exit(0);
+}
+
+------------------------------------------------------------
+EXAMPLE 7) “FIND-STYLE MULTI ROOTS” — loop over paths, do find(path)
+Usage: myfind root1 root2 root3 targetname
+Meaning: search each root for a filename targetname
+(Basic realistic “find” prompt; recursion skeleton)
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fs.h"
+#include "user/user.h"
+
+static void
+find1(char *path, char *target)
+{
+  char buf[512], *p;
+  int fd;
+  struct dirent de;
+  struct stat st;
+
+  if((fd = open(path, 0)) < 0)
+    return;
+
+  if(fstat(fd, &st) < 0){
+    close(fd);
+    return;
+  }
+
+  if(st.type == T_FILE){
+    // compare base name
+    p = path + strlen(path);
+    while(p > path && *(p-1) != '/') p--;
+    if(strcmp(p, target) == 0)
+      printf("%s\n", path);
+    close(fd);
+    return;
+  }
+
+  if(st.type != T_DIR){
+    close(fd);
+    return;
+  }
+
+  if(strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)){
+    close(fd);
+    return;
+  }
+
+  strcpy(buf, path);
+  p = buf + strlen(buf);
+  *p++ = '/';
+
+  while(read(fd, &de, sizeof(de)) == sizeof(de)){
+    if(de.inum == 0) continue;
+    if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+
+    memmove(p, de.name, DIRSIZ);
+    p[DIRSIZ] = 0;
+
+    find1(buf, target);
+  }
+
+  close(fd);
+}
+
+int
+main(int argc, char *argv[])
+{
+  if(argc < 3){
+    fprintf(2, "usage: myfind root... target\n");
+    exit(1);
+  }
+
+  char *target = argv[argc-1];
+
+  // HOW multi-argv is used:
+  // argv[1..argc-2] = roots to search
+  // argv[argc-1]    = target filename
+  for(int i = 1; i < argc-1; i++){
+    find1(argv[i], target);
+  }
+
+  exit(0);
+}
+
+====================================================================
+KEY PATTERN (WHY argv LOOP IS “REAL LOGIC”)
+====================================================================
+If your program takes MANY inputs:
+- Each argv[i] is a value / file / path / job
+- Your “main code” naturally does:
+    for(i=1; i<argc; i++) { use argv[i]; }
+because that is how you process a list of inputs in C.
+
+====================================================================
+END OF MULTI-ARG XV6 EXAMPLES
+====================================================================

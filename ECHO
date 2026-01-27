@@ -1,0 +1,169 @@
+====================================================================
+XV6 ECHO — REALISTIC LAB QUESTIONS + FULL CODE ANSWERS
+(All take MULTIPLE arguments; no stdin parsing unless stated)
+====================================================================
+
+------------------------------------------------------------
+Q1) BASIC ECHO (MOST COMMON)
+Print all arguments separated by spaces, then newline.
+Usage: echo hello world xv6
+Output: hello world xv6
+------------------------------------------------------------
+ANSWER (CODE):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  // argv[1..] are the words to echo
+  for(int i = 1; i < argc; i++){
+    printf("%s", argv[i]);
+    if(i + 1 < argc)
+      printf(" ");
+  }
+  printf("\n");
+  exit(0);
+}
+
+------------------------------------------------------------
+Q2) ECHO WITHOUT TRAILING NEWLINE (-n)
+If first argument is "-n", do NOT print the final newline.
+Usage:
+  echo2 hello world
+  echo2 -n hello world
+------------------------------------------------------------
+ANSWER (CODE):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int start = 1;
+  int newline = 1;
+
+  if(argc > 1 && strcmp(argv[1], "-n") == 0){
+    newline = 0;
+    start = 2;
+  }
+
+  for(int i = start; i < argc; i++){
+    printf("%s", argv[i]);
+    if(i + 1 < argc)
+      printf(" ");
+  }
+
+  if(newline)
+    printf("\n");
+
+  exit(0);
+}
+
+------------------------------------------------------------
+Q3) ECHO WITH FORK (TEACHES PROCESS BASICS)
+Parent forks one child to do the echoing.
+Parent waits.
+Usage: echoF a b c
+------------------------------------------------------------
+ANSWER (CODE):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int pid = fork();
+  if(pid == 0){
+    // child does the echo
+    for(int i = 1; i < argc; i++){
+      printf("%s", argv[i]);
+      if(i + 1 < argc)
+        printf(" ");
+    }
+    printf("\n");
+    exit(0);
+  } else {
+    wait(0);
+    exit(0);
+  }
+}
+
+------------------------------------------------------------
+Q4) ECHO ONE PER LINE (MULTI-ARG PROCESSING)
+Each argument printed on its own line.
+Usage: echol a b c
+------------------------------------------------------------
+ANSWER (CODE):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  for(int i = 1; i < argc; i++){
+    printf("%s\n", argv[i]);
+  }
+  exit(0);
+}
+
+------------------------------------------------------------
+Q5) ECHO VIA PIPE (FD PRACTICE)
+Parent sends argv strings through a pipe.
+Child reads from pipe and prints them.
+Usage: echoP a b c
+------------------------------------------------------------
+ANSWER (CODE):
+------------------------------------------------------------
+#include "kernel/types.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int p[2];
+  char buf[64];
+
+  pipe(p);
+
+  int pid = fork();
+  if(pid == 0){
+    // child: read from pipe, print
+    close(p[1]);
+    int n;
+    while((n = read(p[0], buf, sizeof(buf))) > 0){
+      write(1, buf, n);
+    }
+    close(p[0]);
+    exit(0);
+  } else {
+    // parent: write argv into pipe
+    close(p[0]);
+    for(int i = 1; i < argc; i++){
+      write(p[1], argv[i], strlen(argv[i]));
+      if(i + 1 < argc)
+        write(p[1], " ", 1);
+    }
+    write(p[1], "\n", 1);
+    close(p[1]);
+    wait(0);
+    exit(0);
+  }
+}
+
+====================================================================
+WHAT EXAMINERS ARE TESTING WITH ECHO QUESTIONS
+====================================================================
+- Correct argv looping (argv[1..argc-1])
+- Proper spacing / newline handling
+- Optional flag parsing (-n)
+- fork/wait correctness (no zombies)
+- Pipe + fd discipline (close unused ends)
+
+====================================================================
+END OF ECHO QUESTION SET
+====================================================================

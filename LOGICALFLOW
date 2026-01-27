@@ -1,0 +1,375 @@
+====================================================================
+XV6 UTILITIES & IPC — UNIVERSAL STEP-BY-STEP FLOW TEXTBOOK
+====================================================================
+
+--------------------------------------------------------------------
+0) THE UNIVERSAL MENTAL MODEL
+--------------------------------------------------------------------
+
+Every user utility lives on 3 channels:
+
+- fd 0 = stdin   → where the program READS input
+- fd 1 = stdout  → where the program WRITES normal output
+- fd 2 = stderr  → where the program WRITES errors
+
+Core idea:
+- Utilities DO NOT know whether input comes from:
+  keyboard / file / pipe
+- They just read from fd 0 (or another fd if explicitly opened)
+
+Every utility is basically:
+
+1) read bytes from some file descriptor
+2) process the data (optional)
+3) write bytes to fd 1 (or fd 2 for errors)
+
+--------------------------------------------------------------------
+1) FILE READ PATTERN (CAT-STYLE)
+--------------------------------------------------------------------
+
+Goal:
+- Print a file to stdout
+
+Flow:
+1) Parse arguments
+   - If filename exists → use it
+   - If no filename → use stdin (fd 0)
+
+2) If filename:
+   - open(filename, O_RDONLY)
+   - store returned fd
+
+3) Loop:
+   - read(fd, buffer, N)
+   - if n > 0 → write(1, buffer, n)
+   - if n == 0 → EOF → stop
+   - if n < 0 → error → write to fd 2
+
+4) close(fd) IF it was opened
+
+Traps checklist:
+- stdin mode → DO NOT open anything
+- read() returns BYTES, not lines
+- Never assume line boundaries
+
+--------------------------------------------------------------------
+2) LINE-BASED PROCESSING PATTERN (GREP-STYLE)
+--------------------------------------------------------------------
+
+Goal:
+- Filter and print lines matching a pattern
+
+Flow:
+1) Parse arguments:
+   - pattern
+   - optional filename
+
+2) Choose input fd:
+   - filename → open(file)
+   - else → use fd 0
+
+3) Maintain a LINE BUFFER
+   (because read() gives chunks, not full lines)
+
+4) Loop:
+   - read(fd, chunk)
+   - append chunk to buffer
+   - while buffer contains '\n':
+     - extract one line
+     - test pattern match
+     - if match → write line to stdout
+     - remove line from buffer
+
+5) At EOF:
+   - if leftover data exists (no '\n'):
+     - process it as last line
+
+6) close(fd) if opened
+
+Traps checklist:
+- Lines may be split across reads
+- Pattern matching usually means substring unless stated otherwise
+
+--------------------------------------------------------------------
+3) SIMPLE FORK PATTERN (RUN ONE COMMAND)
+--------------------------------------------------------------------
+
+Goal:
+- Create a child process and wait for it
+
+Flow:
+1) pid = fork()
+
+2) If pid == 0 (child):
+   - do work OR exec another program
+   - exit()
+
+3) Else (parent):
+   - wait(0)
+   - continue or exit
+
+Traps checklist:
+- Handle fork failure (pid < 0) if required
+- Child MUST exit() to avoid running parent code
+
+--------------------------------------------------------------------
+4) ONE-DIRECTION PIPE PATTERN (PARENT → CHILD)
+--------------------------------------------------------------------
+
+Goal:
+- Send data from parent to child using a pipe
+
+Flow:
+1) pipe(p)
+   - p[0] = read end
+   - p[1] = write end
+
+2) fork()
+
+3) Child process:
+   - close(p[1])   // child does NOT write
+   - read(p[0])    // blocks until data or EOF
+   - process / print
+   - close(p[0])
+   - exit()
+
+4) Parent process:
+   - close(p[0])   // parent does NOT read
+   - write(p[1])
+   - close(p[1])   // IMPORTANT: signals EOF
+   - wait(0)
+
+Traps checklist:
+- If write end isn’t closed → reader may block forever
+- Child must not keep unused write end open
+
+--------------------------------------------------------------------
+5) TWO-WAY HANDSHAKE PATTERN (PING-PONG)
+--------------------------------------------------------------------
+
+Goal:
+- Send a message AND receive a reply
+
+Setup:
+- p2c → parent → child
+- c2p → child → parent
+
+Flow:
+1) pipe(p2c); pipe(c2p); fork()
+
+2) Child:
+   - close(p2c[1])  // no writing to p2c
+   - close(c2p[0])  // no reading from c2p
+   - read(p2c[0])
+   - print "received ping"
+   - write(c2p[1])
+   - close used ends
+   - exit()
+
+3) Parent:
+   - close(p2c[0])
+   - close(c2p[1])
+   - write(p2c[1])
+   - read(c2p[0])
+   - print "received pong"
+   - close used ends
+   - wait(0)
+
+Traps checklist:
+- ONE side must write first, other must read first
+- Missing close() causes infinite blocking
+
+--------------------------------------------------------------------
+6) EXEC PATTERN (CHILD BECOMES ANOTHER PROGRAM)
+--------------------------------------------------------------------
+
+Goal:
+- Replace child process with a new program
+
+Flow:
+1) fork()
+
+2) Child:
+   - exec("program", argv)
+   - if exec fails → print error → exit(1)
+
+3) Parent:
+   - wait(0)
+
+Traps checklist:
+- exec replaces memory entirely
+- args[0] should be program name
+
+--------------------------------------------------------------------
+7) I/O REDIRECTION PATTERN (< and >)
+--------------------------------------------------------------------
+
+NOTE:
+- This is SHELL behavior
+- But same steps apply if implementing manually
+
+OUTPUT REDIRECTION ( > ):
+Goal:
+- Make stdout write to a file
+
+Flow:
+1) open("out.txt", create|write|truncate)
+2) close(1)
+3) dup(filefd)   // becomes fd 1
+4) close(filefd)
+5) exec(program)
+
+INPUT REDIRECTION ( < ):
+Goal:
+- Make stdin read from a file
+
+Flow:
+1) open("in.txt", read)
+2) close(0)
+3) dup(filefd)   // becomes fd 0
+4) close(filefd)
+5) exec(program)
+
+Traps checklist:
+- Must close fd BEFORE dup()
+- Redirection MUST happen before exec
+
+--------------------------------------------------------------------
+8) PIPELINE PATTERN (A | B)
+--------------------------------------------------------------------
+
+Goal:
+- Connect stdout of A to stdin of B
+
+Flow (shell logic):
+1) pipe(p)
+
+2) fork child A:
+   - close(1)
+   - dup(p[1])
+   - close unused pipe ends
+   - exec A
+
+3) fork child B:
+   - close(0)
+   - dup(p[0])
+   - close unused pipe ends
+   - exec B
+
+4) Parent:
+   - close both pipe ends
+   - wait for both children
+
+Traps checklist:
+- Parent must close pipe ends
+- Each child closes unused ends
+
+--------------------------------------------------------------------
+9) XARGS PATTERN (STDIN → ARGV → EXEC)
+--------------------------------------------------------------------
+
+Goal:
+- Convert stdin input into argv for another program
+
+Base idea:
+- Pipes pass DATA
+- Programs need ARGUMENTS
+- xargs bridges that gap
+
+Flow:
+1) Read base command from argv (e.g. "echo")
+
+2) Loop:
+   - read one line from stdin
+   - strip newline
+   - build exec_argv[]:
+     - exec_argv[0] = base command
+     - include fixed args if any (e.g. "grep foo")
+     - append input tokens or whole line
+     - terminate with 0
+   - fork()
+   - child → exec(basecmd, exec_argv)
+   - parent → wait()
+
+3) Stop at EOF
+
+Traps checklist:
+- Decide if input line is:
+  - ONE argument OR
+  - MULTIPLE arguments (split by spaces)
+- Do NOT include "xargs" in exec argv
+- Always wait()
+
+--------------------------------------------------------------------
+10) FIND PATTERN (RECURSIVE DIRECTORY WALK)
+--------------------------------------------------------------------
+
+Goal:
+- Recursively search directories
+
+Flow:
+1) open(path)
+2) fstat(fd)
+3) If FILE:
+   - compare basename with target
+   - if match → print full path
+4) If DIRECTORY:
+   - loop reading struct dirent
+   - skip "." and ".."
+   - skip inum == 0
+   - build newpath = path + "/" + name
+   - recurse(newpath)
+5) close(fd)
+
+Traps checklist:
+- Must skip "." and ".."
+- Prevent path buffer overflow
+
+--------------------------------------------------------------------
+11) PRIMES PATTERN (PIPE + FORK SIEVE)
+--------------------------------------------------------------------
+
+Goal:
+- Filter numbers using chained processes
+
+Flow:
+1) Read first number from input pipe
+   - if none → exit
+2) Print number (prime)
+3) Create new pipe
+4) fork():
+   - Child → next filter stage
+   - Parent:
+     - read remaining numbers
+     - if not divisible by prime → write to new pipe
+     - close write end
+     - wait()
+     - exit()
+
+Traps checklist:
+- Must close write end to signal EOF
+- Each stage filters ONLY its prime
+
+--------------------------------------------------------------------
+12) BLOCKING / DEADLOCK DEBUG CHECKLIST
+--------------------------------------------------------------------
+
+If program hangs, check IN THIS ORDER:
+
+1) Are both sides reading first?
+   → Yes = deadlock
+
+2) Are all unused pipe ends closed?
+   → Any open write end can block EOF
+
+3) Did the writer close its write end?
+
+4) Was redirection done BEFORE exec?
+
+5) Are correct pipe ends used?
+   - p[0] → read
+   - p[1] → write
+
+====================================================================
+END OF TEXTBOOK FLOW
+====================================================================

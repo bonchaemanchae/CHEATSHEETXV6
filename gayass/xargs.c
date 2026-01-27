@@ -3,19 +3,24 @@
 // #include "kernel/param.h"
 // #include "user/user.h"
 
+/*
+xargs as a bridge, taking items from a pipe (stdin) turning them into args for a cmd
+e.g if u echo "file1 file2" | xargs rm, xargs reads "file1" and "file2" and then executes rm file1 file2
+*/
+
 #define MAX_LINE_LEN 512
 #define MAXARG 32
 
 int readline(char *buffer) {
   char *p = buffer;
-  while (read(0, p, 1) == 1) {
-    if (*p == '\n') {
-      *p = 0;
-      return 1;
+  while (read(0, p, 1) == 1) { //read 1 byte at a time from stdin aka fd0
+    if (*p == '\n') { //if hit newline
+      *p = 0; //null terminate the string
+      return 1; //return success
     }
-    p++;
+    p++; //increment char that is read
   }
-  return (p != buffer);
+  return (p != buffer); //return true if read something before EOF else breaks
 }
 
 int main(int argc, char *argv[]) {
@@ -26,14 +31,17 @@ int main(int argc, char *argv[]) {
 
   // -n parsing checker
   if (argc > 3 && strcmp(argv[1], "-n") == 0) {
-    n = atoi(argv[2]);
-    cmd_start = 3;
+    n = atoi(argv[2]); //group args by 'n' quantity
+    cmd_start = 3; //cmd starts after '-n' and the number
   }
 
+  /*
+  cmd_args is array eventually passed to exec
+  */
   int i = 0;
   for (int j = cmd_start; j < argc; j++) {
-    cmd_args[i++] = argv[j];
-  }
+    cmd_args[i++] = argv[j]; //copy basic cmds like echo, ls etc
+  } 
 
   int cmd_idx = i;
   int count = 0;

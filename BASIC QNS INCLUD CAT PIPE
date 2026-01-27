@@ -215,6 +215,29 @@ Rules:
 - For each root argv[1..argc-2], recursively search for filename == target
 - Print full path for matches
 - Must skip "." and ".."
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]){
+  if(argc != 2){
+    fprintf(2, "usage: swap32_user <32-bit hex value>\n");
+    exit(1);
+  }
+
+  // parse base-16 (handles "0x..." too)
+  uint x = (uint)strtol(argv[1], 0, 16);
+
+  uint b0 = (x & 0x000000FF) << 24;
+  uint b1 = (x & 0x0000FF00) << 8;
+  uint b2 = (x & 0x00FF0000) >> 8;
+  uint b3 = (x & 0xFF000000) >> 24;
+  uint y = b0 | b1 | b2 | b3;
+
+  printf("Input: 0x%08x\n", x);
+  printf("Output: 0x%08x\n", y);
+  exit(0);
+}
 
 -------------------------
 Q20) “echo -n” flag parsing (argv config)

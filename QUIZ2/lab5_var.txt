@@ -1,0 +1,87 @@
+UTHREAD VARIATIONS
+
+1: CREATE 50 THREADS WITHOUT WRITING 50 FUNC
+- use worker and pass args (thread id/work range)
+- change data structure to support void(*func)(void*) and store an arg pointer
+
+/* CODES */
+struct thread {
+  char stack[STACK_SIZE];
+  int state;
+  struct thread_context context;
+  void (*func)(void*);
+  void *arg;
+};
+
+/* thread entry trampoline, func that runs when thread starts the first time */
+static void
+thread_start(void)
+{
+  current_thread->func(current_thread->arg);
+  current_thread->state = FREE;
+  thread_schedule();
+}
+
+/* worker function */
+void worker(void *xa)
+{
+  int id = (int)(long)xa;
+  for (int i = 0; i < 10; i++) {
+    printf("thread %d iter %d\n", id, i);
+    thread_yield();
+  }
+}
+
+/* new thread_create */
+void
+thread_create(void (*func)(void*), void *arg)
+{
+  struct thread *t;
+  for (t = all_thread; t < all_thread + MAX_THREAD; t++)
+    if (t->state == FREE) break;
+
+  t->state = RUNNABLE;
+  t->func = func;
+  t->arg = arg;
+
+  uint64 sp = (uint64)t->stack + STACK_SIZE;
+  sp &= ~((uint64)0xF);
+  t->context.sp = sp;
+
+  // IMPORTANT: ra points to thread_start, not func directly
+  t->context.ra = (uint64)thread_start;
+}
+
+/* for looping thread creation in main */
+int 
+main(int argc, char *argv[]) 
+{
+  thread_init(); 
+  for (int i = 1; i <= 50; i++)
+    thread_create(worker, (void*)(long)i);
+  current_thread->state = FREE;
+  thread_schedule();  
+  exit(0); 
+}
+
+/* will have error, if so add forward declarations */
+// forward declarations
+void thread_schedule(void);
+void thread_yield(void);
+
+2. WHAT IF ONE THREAD NEVER YIELDS?
+- fix requires timer interrupts or forced yielding (kernel level)
+
+/* CODE */
+
+3. IF THREAD FINISHES BY RETURNING, WHAT HAPPENS?
+- use a trampoline aka thread_start that always cleans up when func returns
+
+/* CODE */
+
+4. ADD THREAD JOINING
+- add ZOMBIE state or store DONE flag
+- thread_join(id) loops: while thread NOT FREE, yield it
+- understanding of busy wait vs proper blocking
+
+/* CODE */

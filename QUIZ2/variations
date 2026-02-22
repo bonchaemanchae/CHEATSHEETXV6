@@ -1,0 +1,1863 @@
+# HIGH-PROBABILITY EXAM VARIATIONS - Complete Solutions
+## Based on Quiz 1 Patterns: Twist Format, Scope, or Move User→Kernel
+
+**Strategy:** They won't invent new OS concepts. They will:
+- ✅ Twist format/scope
+- ✅ Move user → kernel
+- ✅ Change locking granularity
+- ❌ NOT add brand new complex algorithms
+
+---
+
+# 🔵 LAB 3 VARIATIONS (Syscall Implementation)
+
+---
+
+## 1️⃣ HANDSHAKE VARIATIONS
+
+### Original Lab 3 Code (Reference):
+```c
+// Parent sends 1 byte → child receives → child sends back → parent receives
+int main(int argc, char *argv[]) {
+    int p2c[2], c2p[2];
+    char buf[16];
+    
+    pipe(p2c);
+    pipe(c2p);
+    
+    if (fork() == 0) {
+        // CHILD
+        close(p2c[1]);
+        close(c2p[0]);
+        
+        read(p2c[0], buf, 1);
+        printf("%d: received ping\n", getpid());
+        
+        write(c2p[1], "x", 1);
+        printf("%d: sent pong\n", getpid());
+        
+        close(p2c[0]);
+        close(c2p[1]);
+        exit(0);
+    } else {
+        // PARENT
+        close(p2c[0]);
+        close(c2p[1]);
+        
+        write(p2c[1], "x", 1);
+        printf("%d: sent ping\n", getpid());
+        
+        read(c2p[0], buf, 1);
+        printf("%d: received pong\n", getpid());
+        
+        close(p2c[1]);
+        close(c2p[0]);
+        wait(0);
+        exit(0);
+    }
+}
+```
+
+---
+
+### **VARIATION A: Multiple Bytes (VERY LIKELY)**
+
+**Question Stem:**
+```
+Modify handshake.c to send N bytes instead of 1 byte:
+- Take argument: ./handshake <count>
+- Parent sends <count> bytes to child
+- Child receives all bytes and prints count
+- Child sends same bytes back to parent
+- Parent verifies all bytes match
+
+Example:
+$ handshake 5
+100: sent 5 bytes
+101: received 5 bytes
+101: sent 5 bytes
+100: received 5 bytes, verified
+```
+
+**Complete Solution:**
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    int p2c[2], c2p[2];
+    char buf[256];
+    int n;
+    
+    if (argc != 2) {
+        fprintf(2, "Usage: handshake <count>\n");
+        exit(1);
+    }
+    
+    n = atoi(argv[1]);
+    if (n <= 0 || n > 256) {
+        fprintf(2, "count must be 1-256\n");
+        exit(1);
+    }
+    
+    if (pipe(p2c) < 0 || pipe(c2p) < 0) {
+        fprintf(2, "pipe failed\n");
+        exit(1);
+    }
+    
+    if (fork() == 0) {
+        // CHILD
+        close(p2c[1]);
+        close(c2p[0]);
+        
+        // Read N bytes from parent
+        int total = 0;
+        while (total < n) {
+            int r = read(p2c[0], buf + total, n - total);
+            if (r <= 0) break;
+            total += r;
+        }
+        printf("%d: received %d bytes\n", getpid(), total);
+        
+        // Send same bytes back
+        write(c2p[1], buf, total);
+        printf("%d: sent %d bytes\n", getpid(), total);
+        
+        close(p2c[0]);
+        close(c2p[1]);
+        exit(0);
+    } else {
+        // PARENT
+        close(p2c[0]);
+        close(c2p[1]);
+        
+        // Prepare N bytes (fill with pattern)
+        for (int i = 0; i < n; i++) {
+            buf[i] = 'A' + (i % 26);
+        }
+        
+        // Send N bytes to child
+        write(p2c[1], buf, n);
+        printf("%d: sent %d bytes\n", getpid(), n);
+        
+        // Receive N bytes back from child
+        int total = 0;
+        char rbuf[256];
+        while (total < n) {
+            int r = read(c2p[0], rbuf + total, n - total);
+            if (r <= 0) break;
+            total += r;
+        }
+        
+        // Verify bytes match
+        int match = 1;
+        for (int i = 0; i < n; i++) {
+            if (buf[i] != rbuf[i]) {
+                match = 0;
+                break;
+            }
+        }
+        
+        if (match) {
+            printf("%d: received %d bytes, verified\n", getpid(), total);
+        } else {
+            printf("%d: ERROR - bytes mismatch\n", getpid());
+        }
+        
+        close(p2c[1]);
+        close(c2p[0]);
+        wait(0);
+        exit(0);
+    }
+}
+```
+
+**What Changed:**
+- Added `argc/argv` parsing for count
+- Loop around `read()` to handle partial reads
+- Fill buffer with pattern (`'A'`, `'B'`, ... `'Z'`)
+- Verify received bytes match sent bytes
+- **Same pipes, same close logic, same fork structure**
+
+**Where to Add:**
+- File: `user/handshake.c` (modify existing or create new)
+- Makefile: Already has `$U/_handshake` in UPROGS (no change needed)
+
+---
+
+### **VARIATION B: Transform Before Return (LIKELY)**
+
+**Question Stem:**
+```
+Modify handshake.c so child transforms data before sending back:
+- Parent sends N bytes to child
+- Child receives bytes
+- Child transforms: byte[i] = byte[i] + 1 (add 1 to each byte)
+- Child sends transformed bytes back
+- Parent prints before and after values
+
+Example:
+$ handshake 3
+100: sent [10 20 30]
+101: received 3 bytes
+101: transformed and sent back
+100: received [11 21 31]
+```
+
+**Complete Solution:**
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    int p2c[2], c2p[2];
+    unsigned char buf[256];
+    int n = 5;  // default
+    
+    if (argc == 2) {
+        n = atoi(argv[1]);
+    }
+    
+    if (pipe(p2c) < 0 || pipe(c2p) < 0) {
+        fprintf(2, "pipe failed\n");
+        exit(1);
+    }
+    
+    if (fork() == 0) {
+        // CHILD
+        close(p2c[1]);
+        close(c2p[0]);
+        
+        // Read bytes
+        int total = 0;
+        while (total < n) {
+            int r = read(p2c[0], buf + total, n - total);
+            if (r <= 0) break;
+            total += r;
+        }
+        printf("%d: received %d bytes\n", getpid(), total);
+        
+        // TRANSFORM: Add 1 to each byte
+        for (int i = 0; i < total; i++) {
+            buf[i] = buf[i] + 1;
+        }
+        printf("%d: transformed and sent back\n", getpid());
+        
+        // Send transformed bytes back
+        write(c2p[1], buf, total);
+        
+        close(p2c[0]);
+        close(c2p[1]);
+        exit(0);
+    } else {
+        // PARENT
+        close(p2c[0]);
+        close(c2p[1]);
+        
+        // Prepare bytes
+        for (int i = 0; i < n; i++) {
+            buf[i] = 10 + i * 10;  // [10, 20, 30, ...]
+        }
+        
+        // Print original
+        printf("%d: sent [", getpid());
+        for (int i = 0; i < n; i++) {
+            printf("%d", buf[i]);
+            if (i < n - 1) printf(" ");
+        }
+        printf("]\n");
+        
+        // Send to child
+        write(p2c[1], buf, n);
+        
+        // Receive transformed bytes
+        unsigned char rbuf[256];
+        int total = 0;
+        while (total < n) {
+            int r = read(c2p[0], rbuf + total, n - total);
+            if (r <= 0) break;
+            total += r;
+        }
+        
+        // Print transformed
+        printf("%d: received [", getpid());
+        for (int i = 0; i < total; i++) {
+            printf("%d", rbuf[i]);
+            if (i < total - 1) printf(" ");
+        }
+        printf("]\n");
+        
+        close(p2c[1]);
+        close(c2p[0]);
+        wait(0);
+        exit(0);
+    }
+}
+```
+
+**What Changed:**
+- **ONE LINE ADDED:** `buf[i] = buf[i] + 1;` in child
+- Print arrays in `[10 20 30]` format
+- Unsigned char to handle byte arithmetic correctly
+- **Same pipe structure, same close logic**
+
+**Where to Add:**
+- File: `user/handshake.c`
+- Line ~28 (child side): Add loop to transform bytes
+
+---
+
+### **VARIATION C: Reverse Direction (MODERATE PROBABILITY)**
+
+**Question Stem:**
+```
+Reverse handshake: child sends first, parent responds:
+- Child sends ping to parent
+- Parent receives and prints
+- Parent sends pong back to child
+- Child receives and prints
+
+Output:
+101: sent ping
+100: received ping
+100: sent pong
+101: received pong
+```
+
+**Complete Solution:**
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    int p2c[2], c2p[2];
+    char buf[16];
+    
+    if (pipe(p2c) < 0 || pipe(c2p) < 0) {
+        fprintf(2, "pipe failed\n");
+        exit(1);
+    }
+    
+    if (fork() == 0) {
+        // CHILD - NOW SENDS FIRST
+        close(p2c[1]);  // won't write to p2c
+        close(c2p[0]);  // won't read from c2p initially
+        
+        // Child sends first
+        write(c2p[1], "x", 1);
+        printf("%d: sent ping\n", getpid());
+        
+        // Then child receives
+        read(p2c[0], buf, 1);
+        printf("%d: received pong\n", getpid());
+        
+        close(p2c[0]);
+        close(c2p[1]);
+        exit(0);
+    } else {
+        // PARENT - NOW RECEIVES FIRST
+        close(p2c[0]);  // won't read from p2c initially
+        close(c2p[1]);  // won't write to c2p initially
+        
+        // Parent receives first
+        read(c2p[0], buf, 1);
+        printf("%d: received ping\n", getpid());
+        
+        // Then parent sends
+        write(p2c[1], "x", 1);
+        printf("%d: sent pong\n", getpid());
+        
+        close(p2c[1]);
+        close(c2p[0]);
+        wait(0);
+        exit(0);
+    }
+}
+```
+
+**What Changed:**
+- **Child:** `write()` THEN `read()` (was opposite)
+- **Parent:** `read()` THEN `write()` (was opposite)
+- **Pipe names stay same:** p2c = parent-to-child pipe, c2p = child-to-parent pipe
+- **Close logic identical:** just timing of operations flipped
+
+**Where to Add:**
+- File: `user/handshake.c`
+- Swap order of write/read in both parent and child blocks
+
+---
+
+## 2️⃣ SNIFFER VARIATIONS
+
+### Original Lab 3 Code (Reference):
+```c
+int main(int argc, char *argv[]) {
+    char *p = (char *)sbrk(64 * 4096);
+    
+    for (int i = 0; i < 64 * 4096; i++) {
+        if (i + 14 <= 64 * 4096 && 
+            p[i] == 'T' && p[i+1] == 'h' && p[i+2] == 'i' && 
+            p[i+3] == 's' && p[i+4] == ' ' && p[i+5] == 'm' && 
+            p[i+6] == 'a' && p[i+7] == 'y' && p[i+8] == ' ' && 
+            p[i+9] == 'h' && p[i+10] == 'e' && p[i+11] == 'l' && 
+            p[i+12] == 'p' && p[i+13] == '.') {
+            // Found marker at offset i
+            for (int j = 0; j < 16; j++) {
+                char c = p[i + 16 + j];
+                if (c > 32 && c < 127 && c != '(')
+                    printf("%c", c);
+            }
+            printf("\n");
+            exit(0);
+        }
+    }
+    exit(1);
+}
+```
+
+---
+
+### **VARIATION A: Variable Offset (HIGH PROBABILITY)**
+
+**Question Stem:**
+```
+Modify sniffer.c to find secret at variable offset:
+- Marker: "This may help."
+- Secret location: NOT always +16
+- Search forward from marker (up to 64 bytes) for first printable ASCII run
+- Stop at first non-printable character or '\0'
+
+They test: Do you hardcode offsets or actually scan?
+```
+
+**Complete Solution:**
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int is_printable(char c) {
+    return (c > 32 && c < 127 && c != '(');
+}
+
+int main(int argc, char *argv[]) {
+    char *p = (char *)sbrk(64 * 4096);
+    const char *marker = "This may help.";
+    int marker_len = 14;
+    
+    for (int i = 0; i < 64 * 4096 - marker_len - 64; i++) {
+        // Check if marker found at position i
+        int match = 1;
+        for (int k = 0; k < marker_len; k++) {
+            if (p[i + k] != marker[k]) {
+                match = 0;
+                break;
+            }
+        }
+        
+        if (match) {
+            // Found marker - now search for secret
+            // Look in next 64 bytes for first printable run
+            int secret_start = -1;
+            
+            for (int offset = 0; offset < 64; offset++) {
+                if (is_printable(p[i + marker_len + offset])) {
+                    secret_start = offset;
+                    break;
+                }
+            }
+            
+            if (secret_start >= 0) {
+                // Print secret until non-printable or null
+                int pos = i + marker_len + secret_start;
+                while (pos < 64 * 4096) {
+                    char c = p[pos];
+                    if (!is_printable(c) || c == '\0') {
+                        break;
+                    }
+                    printf("%c", c);
+                    pos++;
+                }
+                printf("\n");
+                exit(0);
+            }
+        }
+    }
+    
+    exit(1);
+}
+```
+
+**What Changed:**
+- **Removed hardcoded +16 offset**
+- Added **search loop** (line 31-37) to find first printable char
+- Added **dynamic stopping** (line 43-49) - stop at first non-printable
+- Added `is_printable()` helper function
+- **Same sbrk() allocation, same marker matching**
+
+**Where to Add:**
+- File: `user/sniffer.c`
+- Replace fixed `i+16` with search logic
+
+---
+
+### **VARIATION B: Length Constraint (LIKELY)**
+
+**Question Stem:**
+```
+Modify sniffer.c to handle secrets of variable length:
+- Secret is null-terminated string
+- Secret length ≤ 32 characters
+- Print exactly the secret (stop at '\0', no garbage)
+- If no '\0' found in 32 bytes, print error
+
+Example secrets:
+- "FLAG{sh0rt}" → 12 chars
+- "verylongsecretpassword..." → stops at '\0'
+```
+
+**Complete Solution:**
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    char *p = (char *)sbrk(64 * 4096);
+    const char *marker = "This may help.";
+    int marker_len = 14;
+    const int MAX_SECRET_LEN = 32;
+    
+    for (int i = 0; i < 64 * 4096 - marker_len - MAX_SECRET_LEN; i++) {
+        // Check marker
+        int match = 1;
+        for (int k = 0; k < marker_len; k++) {
+            if (p[i + k] != marker[k]) {
+                match = 0;
+                break;
+            }
+        }
+        
+        if (match) {
+            // Found marker - extract secret
+            int secret_pos = i + 16;  // Assume starts at +16
+            int found_null = 0;
+            int len = 0;
+            
+            // Find null terminator or max length
+            for (int j = 0; j < MAX_SECRET_LEN; j++) {
+                char c = p[secret_pos + j];
+                if (c == '\0') {
+                    found_null = 1;
+                    len = j;
+                    break;
+                }
+                len = j + 1;
+            }
+            
+            if (!found_null && len == MAX_SECRET_LEN) {
+                printf("Error: Secret exceeds max length\n");
+                exit(1);
+            }
+            
+            // Print exactly len characters
+            for (int j = 0; j < len; j++) {
+                char c = p[secret_pos + j];
+                if (c > 32 && c < 127 && c != '(') {
+                    printf("%c", c);
+                }
+            }
+            printf("\n");
+            exit(0);
+        }
+    }
+    
+    exit(1);
+}
+```
+
+**What Changed:**
+- Added `MAX_SECRET_LEN` constant (32)
+- Added **null-terminator search** (line 28-36)
+- Added **length tracking** (`len` variable)
+- Print exactly `len` characters (not fixed 16)
+- **Error handling** if no null found in 32 bytes
+- **Same sbrk(), same marker matching**
+
+**Where to Add:**
+- File: `user/sniffer.c`
+- Replace fixed-length print loop with null-aware loop
+
+---
+
+### **VARIATION C: Single Allocation Only (MODERATE PROBABILITY)**
+
+**Question Stem:**
+```
+Modify sniffer.c with constraint:
+- You may call sbrk() only ONCE
+- No repeated allocations
+- Must still find secret in allocated memory
+
+This tests: Do you allocate efficiently?
+```
+
+**Complete Solution:**
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    // SINGLE sbrk() call - allocate all at once
+    char *p = (char *)sbrk(64 * 4096);
+    
+    if (p == (char *)-1) {
+        fprintf(2, "sbrk failed\n");
+        exit(1);
+    }
+    
+    const char *marker = "This may help.";
+    int marker_len = 14;
+    int total_size = 64 * 4096;
+    
+    // Scan allocated memory for marker
+    for (int i = 0; i < total_size - marker_len - 16; i++) {
+        int match = 1;
+        
+        // Check marker match
+        for (int k = 0; k < marker_len; k++) {
+            if (p[i + k] != marker[k]) {
+                match = 0;
+                break;
+            }
+        }
+        
+        if (match) {
+            // Found marker - extract secret
+            for (int j = 0; j < 16; j++) {
+                char c = p[i + marker_len + j];
+                if (c > 32 && c < 127 && c != '(')
+                    printf("%c", c);
+            }
+            printf("\n");
+            exit(0);
+        }
+    }
+    
+    fprintf(2, "Secret not found\n");
+    exit(1);
+}
+```
+
+**What Changed:**
+- **Only ONE sbrk() call** at line 7
+- Added error check: `if (p == (char *)-1)`
+- Store total_size for bounds checking
+- **Same scanning logic**
+- Added "Secret not found" error message
+- **No loops that call sbrk() multiple times**
+
+**Where to Add:**
+- File: `user/sniffer.c`
+- Ensure only ONE sbrk() call in entire program
+- Add bounds check for safety
+
+---
+
+## 3️⃣ MONITOR VARIATIONS
+
+### Original Lab 3 Code (Reference):
+
+**User Program:**
+```c
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(2, "Usage: monitor <mask> <program> [args...]\n");
+        exit(1);
+    }
+    
+    int mask = atoi(argv[1]);
+    monitor(mask);
+    exec(argv[2], &argv[2]);
+    exit(1);
+}
+```
+
+**Kernel - syscall.c:**
+```c
+void syscall(void) {
+    int num;
+    struct proc *p = myproc();
+    
+    num = p->trapframe->a7;
+    if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+        p->trapframe->a0 = syscalls[num]();
+        
+        // After syscall returns
+        if ((p->monitor_mask & (1 << num)) && syscall_names[num]) {
+            printf("%d: syscall %s -> %ld\n",
+                   p->pid,
+                   syscall_names[num],
+                   p->trapframe->a0);
+        }
+    }
+}
+```
+
+---
+
+### **VARIATION A: Print BEFORE Syscall (HIGH PROBABILITY)**
+
+**Question Stem:**
+```
+Modify monitor syscall to print BEFORE execution instead of after:
+- Output: "pid: entering read"
+- Not: "pid: syscall read -> 5"
+- Still use same bitmask mechanism
+- Still inherit via fork
+
+They test: Do you understand syscall() execution flow?
+```
+
+**Complete Kernel Solution:**
+
+**kernel/syscall.c - Modify syscall() function:**
+```c
+void syscall(void) {
+    int num;
+    struct proc *p = myproc();
+    
+    num = p->trapframe->a7;
+    if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+        
+        // NEW: Print BEFORE executing syscall
+        if ((p->monitor_mask & (1 << num)) && syscall_names[num]) {
+            printf("%d: entering %s\n", p->pid, syscall_names[num]);
+        }
+        
+        // Execute syscall
+        p->trapframe->a0 = syscalls[num]();
+        
+        // OLD location (after syscall) - now removed
+    } else {
+        printf("%d %s: unknown sys call %d\n",
+               p->pid, p->name, num);
+        p->trapframe->a0 = -1;
+    }
+}
+```
+
+**What Changed:**
+- **Moved printf BEFORE line `p->trapframe->a0 = syscalls[num]()`**
+- Changed format: `"entering %s"` instead of `"syscall %s -> %ld"`
+- **No return value shown** (hasn't executed yet)
+- **Same monitor_mask check, same bitmask logic**
+- **Same 9-file syscall pattern** (no changes to other files)
+
+**Where to Change:**
+- File: `kernel/syscall.c`
+- Function: `syscall()`
+- Lines: ~140-150 (move print statement 3 lines up)
+
+**User Program:** (NO CHANGE)
+```c
+// user/monitor.c stays IDENTICAL
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(2, "Usage: monitor <mask> <program> [args...]\n");
+        exit(1);
+    }
+    
+    int mask = atoi(argv[1]);
+    monitor(mask);
+    exec(argv[2], &argv[2]);
+    exit(1);
+}
+```
+
+**Expected Output:**
+```bash
+$ monitor 31 cat README
+100: entering open
+100: entering read
+100: entering write
+...
+```
+
+---
+
+### **VARIATION B: Add Second Syscall - `reset_monitor()` (LIKELY)**
+
+**Question Stem:**
+```
+Add a second syscall reset_monitor() that disables all tracing:
+- reset_monitor() sets monitor_mask = 0
+- Use same 9-file pattern
+- User program: monitor(31) → run code → reset_monitor() → no more trace
+
+They test: Can you repeat syscall plumbing without confusion?
+```
+
+**Complete Solution - 9 Files:**
+
+**1. kernel/syscall.h:**
+```c
+#define SYS_monitor 22
+#define SYS_reset_monitor 23  // NEW
+```
+
+**2. kernel/sysproc.c:**
+```c
+uint64 sys_monitor(void) {
+    int mask;
+    argint(0, &mask);
+    myproc()->monitor_mask = mask;
+    return 0;
+}
+
+// NEW: Add reset_monitor syscall
+uint64 sys_reset_monitor(void) {
+    myproc()->monitor_mask = 0;
+    return 0;
+}
+```
+
+**3. user/user.h:**
+```c
+int monitor(int);
+int reset_monitor(void);  // NEW
+```
+
+**4. user/usys.pl:**
+```c
+entry("monitor");
+entry("reset_monitor");  // NEW
+```
+
+**5. kernel/syscall.c:**
+```c
+extern uint64 sys_monitor(void);
+extern uint64 sys_reset_monitor(void);  // NEW
+
+static uint64 (*syscalls[])(void) = {
+    // ... existing syscalls ...
+    [SYS_monitor] sys_monitor,
+    [SYS_reset_monitor] sys_reset_monitor,  // NEW
+};
+
+static char *syscall_names[] = {
+    // ... existing names ...
+    [SYS_monitor] = "monitor",
+    [SYS_reset_monitor] = "reset_monitor",  // NEW
+};
+```
+
+**6. kernel/proc.h:** (NO CHANGE - already has monitor_mask field)
+
+**7. kernel/proc.c:** (NO CHANGE - allocproc/fork already handle monitor_mask)
+
+**8. Makefile:** (NO CHANGE)
+
+**9. user/monitor_test.c (NEW TEST PROGRAM):**
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    // Enable tracing
+    printf("Enabling monitor for read/write\n");
+    monitor((1 << 5) | (1 << 16));  // SYS_read=5, SYS_write=16
+    
+    // These will be traced
+    char buf[10];
+    read(0, buf, 1);
+    write(1, "x", 1);
+    
+    // Disable tracing
+    printf("Disabling monitor\n");
+    reset_monitor();
+    
+    // These will NOT be traced
+    read(0, buf, 1);
+    write(1, "y", 1);
+    
+    exit(0);
+}
+```
+
+**What Changed:**
+- **Added ONE new syscall** using same 9-file pattern
+- `reset_monitor()` implementation is 1 line: `myproc()->monitor_mask = 0;`
+- **No new fields in proc structure**
+- **Same inheritance via fork** (copy monitor_mask)
+
+**Where to Add:**
+- File: `user/monitor_test.c` (new file to test both syscalls)
+- Makefile: Add `$U/_monitor_test` to UPROGS
+
+**Expected Output:**
+```bash
+$ monitor_test
+Enabling monitor for read/write
+100: syscall read -> 1
+100: syscall write -> 1
+Disabling monitor
+```
+
+---
+
+### **VARIATION C: Monitor Only Children (MODERATE PROBABILITY)**
+
+**Question Stem:**
+```
+Modify monitor() to affect ONLY child processes, not caller:
+- Parent calls monitor(mask)
+- Parent's own syscalls NOT traced
+- After fork(), child inherits mask and IS traced
+- Test: parent fork → child traced, parent not traced
+
+They test: Do you understand fork's proc field copying?
+```
+
+**Complete Solution:**
+
+**kernel/proc.h:** (ADD NEW FIELD)
+```c
+struct proc {
+    // ... existing fields ...
+    uint32 monitor_mask;           // existing
+    int monitor_self;              // NEW: 1=trace self, 0=only children
+};
+```
+
+**kernel/proc.c - allocproc():**
+```c
+p->monitor_mask = 0;
+p->monitor_self = 0;  // NEW
+```
+
+**kernel/proc.c - fork():**
+```c
+// Copy monitor settings
+np->monitor_mask = p->monitor_mask;
+np->monitor_self = 1;  // NEW: Child WILL be traced
+```
+
+**kernel/sysproc.c:**
+```c
+uint64 sys_monitor(void) {
+    int mask;
+    argint(0, &mask);
+    
+    struct proc *p = myproc();
+    p->monitor_mask = mask;
+    p->monitor_self = 0;  // NEW: Don't trace caller itself
+    
+    return 0;
+}
+```
+
+**kernel/syscall.c - syscall():**
+```c
+void syscall(void) {
+    int num;
+    struct proc *p = myproc();
+    
+    num = p->trapframe->a7;
+    if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+        p->trapframe->a0 = syscalls[num]();
+        
+        // NEW: Check BOTH mask and monitor_self flag
+        if ((p->monitor_mask & (1 << num)) && 
+            p->monitor_self &&            // NEW condition
+            syscall_names[num]) {
+            printf("%d: syscall %s -> %ld\n",
+                   p->pid,
+                   syscall_names[num],
+                   p->trapframe->a0);
+        }
+    }
+}
+```
+
+**User Test Program:**
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int main(int argc, char *argv[]) {
+    printf("Parent: enabling monitor\n");
+    monitor(31);  // Monitor read/write/open/close/...
+    
+    printf("Parent: calling write (should NOT be traced)\n");
+    write(1, ".", 1);
+    printf("\n");
+    
+    if (fork() == 0) {
+        // CHILD
+        printf("Child: calling write (SHOULD be traced)\n");
+        write(1, "x", 1);
+        printf("\n");
+        exit(0);
+    }
+    
+    wait(0);
+    exit(0);
+}
+```
+
+**What Changed:**
+- **Added `monitor_self` field** to struct proc
+- **Parent sets monitor_self=0** when calling monitor()
+- **Child inherits mask but gets monitor_self=1** in fork()
+- **syscall() checks BOTH conditions** before printing
+- **Same monitor_mask mechanism, just added flag**
+
+**Where to Add:**
+- File: `kernel/proc.h` - Add monitor_self field after monitor_mask
+- File: `kernel/proc.c` - Initialize/copy monitor_self
+- File: `kernel/sysproc.c` - Set monitor_self=0 in sys_monitor()
+- File: `kernel/syscall.c` - Add monitor_self check
+
+**Expected Output:**
+```bash
+$ monitor_children_test
+Parent: enabling monitor
+Parent: calling write (should NOT be traced)
+.
+Child: calling write (SHOULD be traced)
+101: syscall write -> 1
+x
+```
+
+---
+
+# 🟢 LAB 5 VARIATIONS (Threading)
+
+---
+
+## 4️⃣ UTHREAD VARIATIONS
+
+### Original Lab 5 Code (Reference):
+
+**user/uthread.c:**
+```c
+struct thread_context {
+    uint64 ra, sp, s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11;
+};
+
+void thread_create(void (*func)()) {
+    struct thread *t;
+    for (t = thread; t < &thread[MAX_THREAD]; t++) {
+        if (t->state == FREE) break;
+    }
+    t->state = RUNNABLE;
+    t->context.ra = (uint64)func;
+    t->context.sp = (uint64)t->stack + STACK_SIZE;
+}
+
+void thread_schedule(void) {
+    struct thread *t;
+    while (1) {
+        for (t = thread; t < &thread[MAX_THREAD]; t++) {
+            if (t->state == RUNNABLE) {
+                t->state = RUNNING;
+                int last = current_thread;
+                current_thread = t - thread;
+                thread_switch(&thread[last].context, &thread[current_thread].context);
+                thread[last].state = RUNNABLE;
+            }
+        }
+    }
+}
+```
+
+**user/uthread_switch.S:**
+```asm
+thread_switch:
+    sd ra, 0(a0)
+    sd sp, 8(a0)
+    sd s0, 16(a0)
+    # ... save s1-s11 ...
+    
+    ld ra, 0(a1)
+    ld sp, 8(a1)
+    ld s0, 16(a1)
+    # ... restore s1-s11 ...
+    
+    ret
+```
+
+---
+
+### **VARIATION A: Add Thread Join (VERY LIKELY)**
+
+**Question Stem:**
+```
+Add thread_join(int tid) function:
+- Waits until thread tid finishes (state == FREE)
+- Returns when thread exits
+- Use simple busy-wait loop
+
+Test:
+- Main creates thread_a
+- Main calls thread_join(tid_a)
+- Main only exits after thread_a finishes
+
+They test: Do you understand thread states?
+```
+
+**Complete Solution:**
+
+**user/uthread.c - Add join function:**
+```c
+struct thread_context {
+    uint64 ra, sp, s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11;
+};
+
+struct thread {
+    char stack[STACK_SIZE];
+    struct thread_context context;
+    enum state { FREE, RUNNING, RUNNABLE } state;
+    int tid;  // NEW: Thread ID
+};
+
+struct thread thread[MAX_THREAD];
+int current_thread;
+int next_tid = 1;  // NEW: For assigning IDs
+
+void thread_init(void) {
+    current_thread = 0;
+    thread[0].state = RUNNING;
+    thread[0].tid = 0;  // NEW
+}
+
+int thread_create(void (*func)()) {
+    struct thread *t;
+    for (t = thread; t < &thread[MAX_THREAD]; t++) {
+        if (t->state == FREE) break;
+    }
+    if (t >= &thread[MAX_THREAD])
+        return -1;
+    
+    t->state = RUNNABLE;
+    t->tid = next_tid++;  // NEW: Assign ID
+    t->context.ra = (uint64)func;
+    t->context.sp = (uint64)t->stack + STACK_SIZE;
+    
+    return t->tid;  // NEW: Return thread ID
+}
+
+// NEW: Join function
+void thread_join(int tid) {
+    struct thread *t;
+    
+    // Find thread with this ID
+    for (t = thread; t < &thread[MAX_THREAD]; t++) {
+        if (t->tid == tid) {
+            // Busy-wait until thread is FREE
+            while (t->state != FREE) {
+                thread_yield();
+            }
+            return;
+        }
+    }
+}
+
+void thread_schedule(void) {
+    struct thread *t;
+    
+    while (1) {
+        for (t = thread; t < &thread[MAX_THREAD]; t++) {
+            if (t->state == RUNNABLE) {
+                t->state = RUNNING;
+                int last = current_thread;
+                current_thread = t - thread;
+                thread_switch(&thread[last].context, 
+                             &thread[current_thread].context);
+                thread[last].state = RUNNABLE;
+            }
+        }
+        
+        // Check if all threads done
+        int any_runnable = 0;
+        for (t = thread; t < &thread[MAX_THREAD]; t++) {
+            if (t->state == RUNNABLE || t->state == RUNNING) {
+                any_runnable = 1;
+                break;
+            }
+        }
+        if (!any_runnable) {
+            printf("thread_schedule: all threads done\n");
+            exit(0);
+        }
+    }
+}
+
+// Modify thread exit
+void thread_a(void) {
+    for (int i = 0; i < 100; i++) {
+        printf("thread_a %d\n", i);
+        thread_yield();
+    }
+    printf("thread_a: exit\n");
+    thread[current_thread].state = FREE;  // Mark as done
+    thread_schedule();
+}
+
+int main(int argc, char *argv[]) {
+    thread_init();
+    
+    int tid_a = thread_create(thread_a);
+    int tid_b = thread_create(thread_b);
+    
+    printf("Main: waiting for thread_a (tid=%d)\n", tid_a);
+    thread_join(tid_a);
+    printf("Main: thread_a finished\n");
+    
+    printf("Main: waiting for thread_b (tid=%d)\n", tid_b);
+    thread_join(tid_b);
+    printf("Main: thread_b finished\n");
+    
+    exit(0);
+}
+```
+
+**What Changed:**
+- **Added `tid` field** to struct thread
+- **thread_create() now returns tid**
+- **Added `thread_join(tid)` function** - busy-wait on state
+- **Threads set state=FREE** when exiting
+- **Same thread_switch assembly** (no changes)
+
+**Where to Add:**
+- File: `user/uthread.c`
+- Add `tid` field to struct thread (line ~20)
+- Modify thread_create to return tid (line ~35)
+- Add thread_join function (line ~45-60)
+- Modify main() to call thread_join
+
+---
+
+### **VARIATION B: Missing Register Bug (DEBUG QUESTION)**
+
+**Question Stem:**
+```
+This uthread_switch.S is BROKEN - it's missing saving register s3:
+
+    sd ra, 0(a0)
+    sd sp, 8(a0)
+    sd s0, 16(a0)
+    sd s1, 24(a0)
+    sd s2, 32(a0)
+    # Missing: sd s3, 40(a0)  ← BUG!
+    sd s4, 48(a0)
+    ...
+
+Question: 
+1. Why does this cause thread corruption?
+2. Fix by adding the missing line
+
+They test: Do you know callee-saved register list?
+```
+
+**Solution - Diagnostic:**
+
+**Why it breaks:**
+- `s3` is a **callee-saved register** (RISC-V ABI)
+- Thread A uses `s3` for local variables
+- Context switch happens
+- `s3` NOT saved → Thread B overwrites it
+- Thread A resumes → `s3` has garbage value
+- Thread A's variables corrupted
+
+**Fix:**
+
+**user/uthread_switch.S:**
+```asm
+.globl thread_switch
+thread_switch:
+    # Save context of current thread (a0)
+    sd ra, 0(a0)
+    sd sp, 8(a0)
+    sd s0, 16(a0)
+    sd s1, 24(a0)
+    sd s2, 32(a0)
+    sd s3, 40(a0)     # FIX: Add this line
+    sd s4, 48(a0)
+    sd s5, 56(a0)
+    sd s6, 64(a0)
+    sd s7, 72(a0)
+    sd s8, 80(a0)
+    sd s9, 88(a0)
+    sd s10, 96(a0)
+    sd s11, 104(a0)
+    
+    # Restore context of next thread (a1)
+    ld ra, 0(a1)
+    ld sp, 8(a1)
+    ld s0, 16(a1)
+    ld s1, 24(a1)
+    ld s2, 32(a1)
+    ld s3, 40(a1)     # FIX: Add this line
+    ld s4, 48(a1)
+    ld s5, 56(a1)
+    ld s6, 64(a1)
+    ld s7, 72(a1)
+    ld s8, 80(a1)
+    ld s9, 88(a1)
+    ld s10, 96(a1)
+    ld s11, 104(a1)
+    
+    ret
+```
+
+**What Changed:**
+- **Added TWO lines:** `sd s3, 40(a0)` and `ld s3, 40(a1)`
+- **Offsets stay consistent:** each register is 8 bytes (64 bits)
+- **Callee-saved registers list:** ra, sp, s0-s11 (14 total)
+
+**Where to Add:**
+- File: `user/uthread_switch.S`
+- Lines: After `sd s2, 32(a0)` and `ld s2, 32(a1)`
+
+---
+
+### **VARIATION C: Round-Robin Scheduling (MODERATE PROBABILITY)**
+
+**Question Stem:**
+```
+Modify thread_schedule() to skip the current thread:
+- Current thread yields
+- Scheduler picks NEXT runnable thread (not current)
+- This ensures fair round-robin
+- Don't always start from thread[0]
+
+They test: Do you understand scheduling policy?
+```
+
+**Complete Solution:**
+
+**user/uthread.c - Modify thread_schedule():**
+```c
+void thread_schedule(void) {
+    struct thread *t;
+    
+    while (1) {
+        // Start search from NEXT thread (round-robin)
+        int start = (current_thread + 1) % MAX_THREAD;
+        int found = 0;
+        
+        for (int i = 0; i < MAX_THREAD; i++) {
+            int idx = (start + i) % MAX_THREAD;
+            t = &thread[idx];
+            
+            if (t->state == RUNNABLE) {
+                t->state = RUNNING;
+                int last = current_thread;
+                current_thread = idx;
+                
+                thread_switch(&thread[last].context, 
+                             &thread[current_thread].context);
+                
+                thread[last].state = RUNNABLE;
+                found = 1;
+                break;
+            }
+        }
+        
+        if (!found) {
+            printf("thread_schedule: no runnable threads\n");
+            exit(0);
+        }
+    }
+}
+```
+
+**What Changed:**
+- **Start search at (current_thread + 1) % MAX_THREAD**
+- **Use modulo arithmetic** to wrap around
+- **Loop through all threads** starting from next position
+- **Same thread_switch call**
+- **Same state transitions**
+
+**Where to Add:**
+- File: `user/uthread.c`
+- Function: `thread_schedule()`
+- Replace simple for-loop with round-robin search
+
+**Expected Behavior:**
+```
+thread_a 0
+thread_b 0    ← switches to next thread, not back to thread_a
+thread_c 0
+thread_a 1
+thread_b 1
+thread_c 1
+...
+```
+
+---
+
+## 5️⃣ HASH TABLE VARIATIONS
+
+### Original Lab 5 Code (Reference):
+
+**notxv6/ph-with-mutex-locks.c:**
+```c
+struct entry {
+    int key;
+    int value;
+    struct entry *next;
+};
+
+struct bucket {
+    struct entry *head;
+    pthread_mutex_t lock;
+} buckets[NBUCKET];
+
+void put(int key, int value) {
+    int i = key % NBUCKET;
+    pthread_mutex_lock(&buckets[i].lock);
+    insert(key, value, &buckets[i].head);
+    pthread_mutex_unlock(&buckets[i].lock);
+}
+
+int get(int key) {
+    int i = key % NBUCKET;
+    // No lock - read-only
+    for (struct entry *e = buckets[i].head; e; e = e->next) {
+        if (e->key == key)
+            return e->value;
+    }
+    return -1;
+}
+```
+
+---
+
+### **VARIATION A: Global Lock First (VERY LIKELY - PROGRESSIVE GRADING)**
+
+**Question Stem:**
+```
+Part 1: Add SINGLE global lock (not per-bucket):
+- Declare one pthread_mutex_t global_lock
+- Lock entire put() operation
+- Lock entire get() operation
+- Verify 0 missing keys
+
+Part 2: Then convert to per-bucket locks (like original)
+- Create NBUCKET locks
+- Lock only specific bucket
+
+They test: Progressive implementation (simple → complex)
+```
+
+**Complete Solution - Part 1 (Global Lock):**
+
+**notxv6/ph-global-lock.c:**
+```c
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <assert.h>
+#include <pthread.h>
+
+#define NBUCKET 5
+#define NKEYS 100000
+
+struct entry {
+    int key;
+    int value;
+    struct entry *next;
+};
+
+struct entry *buckets[NBUCKET];
+pthread_mutex_t global_lock;  // NEW: Single global lock
+
+void insert(int key, int value, struct entry **head) {
+    struct entry *e = malloc(sizeof(struct entry));
+    e->key = key;
+    e->value = value;
+    e->next = *head;
+    *head = e;
+}
+
+void put(int key, int value) {
+    int i = key % NBUCKET;
+    
+    // NEW: Lock entire hash table
+    pthread_mutex_lock(&global_lock);
+    insert(key, value, &buckets[i]);
+    pthread_mutex_unlock(&global_lock);
+}
+
+int get(int key) {
+    int i = key % NBUCKET;
+    
+    // NEW: Lock for get too (safe but slow)
+    pthread_mutex_lock(&global_lock);
+    
+    int result = -1;
+    for (struct entry *e = buckets[i]; e; e = e->next) {
+        if (e->key == key) {
+            result = e->value;
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&global_lock);
+    return result;
+}
+
+void init(void) {
+    for (int i = 0; i < NBUCKET; i++) {
+        buckets[i] = NULL;
+    }
+    pthread_mutex_init(&global_lock, NULL);  // NEW: Init lock
+}
+
+void destroy(void) {
+    pthread_mutex_destroy(&global_lock);  // NEW: Cleanup
+}
+
+void *thread_put(void *xa) {
+    int n = (long) xa;
+    int b = NKEYS / n;
+    for (int i = 0; i < b; i++) {
+        put(i, 0);
+    }
+    return NULL;
+}
+
+void *thread_get(void *xa) {
+    int n = (long) xa;
+    int b = NKEYS / n;
+    for (int i = 0; i < b; i++) {
+        int res = get(i);
+        assert(res == 0);
+    }
+    return NULL;
+}
+
+int main(int argc, char *argv[]) {
+    pthread_t *tha, *thb;
+    long i;
+    long n = atoi(argv[1]);
+    
+    tha = malloc(sizeof(pthread_t) * n);
+    thb = malloc(sizeof(pthread_t) * n);
+    
+    init();
+    
+    // Puts
+    for (i = 0; i < n; i++) {
+        assert(pthread_create(&tha[i], NULL, thread_put, 
+                            (void *) (long) n) == 0);
+    }
+    for (i = 0; i < n; i++) {
+        assert(pthread_join(tha[i], NULL) == 0);
+    }
+    
+    // Gets
+    for (i = 0; i < n; i++) {
+        assert(pthread_create(&thb[i], NULL, thread_get, 
+                            (void *) (long) n) == 0);
+    }
+    for (i = 0; i < n; i++) {
+        assert(pthread_join(thb[i], NULL) == 0);
+    }
+    
+    printf("0: 0 keys missing\n");
+    destroy();
+    return 0;
+}
+```
+
+**What Changed:**
+- **ONE global lock** instead of NBUCKET locks
+- **Both put() AND get() use lock** (safe but slow)
+- **Init/destroy** global lock
+- **No per-bucket lock array**
+- **Correct but slower** (threads serialize on global lock)
+
+**Where to Add:**
+- File: `notxv6/ph-global-lock.c` (new file)
+- Makefile: Add build rule for `ph-global-lock`
+
+---
+
+**Part 2 Solution (Per-Bucket - Original):**
+
+**notxv6/ph-per-bucket-lock.c:**
+```c
+struct bucket {
+    struct entry *head;
+    pthread_mutex_t lock;  // Per-bucket lock
+} buckets[NBUCKET];
+
+void put(int key, int value) {
+    int i = key % NBUCKET;
+    pthread_mutex_lock(&buckets[i].lock);  // Lock THIS bucket only
+    insert(key, value, &buckets[i].head);
+    pthread_mutex_unlock(&buckets[i].lock);
+}
+
+void init(void) {
+    for (int i = 0; i < NBUCKET; i++) {
+        buckets[i].head = NULL;
+        pthread_mutex_init(&buckets[i].lock, NULL);  // Init each lock
+    }
+}
+```
+
+**What Changed from Part 1:**
+- **Array of locks** (one per bucket)
+- **Lock only specific bucket** `buckets[i].lock`
+- **Parallel puts to different buckets** don't block each other
+- **Faster** (expected >1.25x speedup with 2 threads)
+
+---
+
+### **VARIATION B: Lock get() Too (LIKELY)**
+
+**Question Stem:**
+```
+Modify so get() needs lock:
+- Scenario: Threads call put() and get() simultaneously
+- Without lock on get(), reads during writes can see inconsistent state
+- Add lock to get() to make thread-safe
+
+Compare throughput with/without lock on get().
+```
+
+**Complete Solution:**
+
+**notxv6/ph-lock-get.c:**
+```c
+void put(int key, int value) {
+    int i = key % NBUCKET;
+    pthread_mutex_lock(&buckets[i].lock);
+    insert(key, value, &buckets[i].head);
+    pthread_mutex_unlock(&buckets[i].lock);
+}
+
+int get(int key) {
+    int i = key % NBUCKET;
+    
+    // NEW: Lock for get (was not locked before)
+    pthread_mutex_lock(&buckets[i].lock);
+    
+    int result = -1;
+    for (struct entry *e = buckets[i].head; e; e = e->next) {
+        if (e->key == key) {
+            result = e->value;
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&buckets[i].lock);
+    return result;
+}
+```
+
+**What Changed:**
+- **Added lock/unlock in get()** (lines 12, 22)
+- **Same per-bucket lock** as put()
+- **Readers now block each other** (slower gets phase)
+- **More correct** if puts/gets interleave
+
+**Where to Add:**
+- File: `notxv6/ph-lock-get.c`
+- Function: `get()`
+- Add pthread_mutex_lock/unlock around read loop
+
+**Expected Performance:**
+```
+Without lock on get(): 2x speedup on gets (readers parallel)
+With lock on get(): 1.5x speedup (readers serialize per bucket)
+```
+
+---
+
+### **VARIATION C: Increase Bucket Count (EASY)**
+
+**Question Stem:**
+```
+Change NBUCKET from 5 to 10:
+- More buckets = less contention
+- Need 10 locks instead of 5
+- Measure if throughput improves
+
+They test: Do you hardcode bucket count or use NBUCKET everywhere?
+```
+
+**Complete Solution:**
+
+**notxv6/ph-10-buckets.c:**
+```c
+#define NBUCKET 10  // Changed from 5
+#define NKEYS 100000
+
+struct bucket {
+    struct entry *head;
+    pthread_mutex_t lock;
+} buckets[NBUCKET];  // Array automatically sized
+
+void put(int key, int value) {
+    int i = key % NBUCKET;  // Uses new NBUCKET
+    pthread_mutex_lock(&buckets[i].lock);
+    insert(key, value, &buckets[i].head);
+    pthread_mutex_unlock(&buckets[i].lock);
+}
+
+void init(void) {
+    for (int i = 0; i < NBUCKET; i++) {  // Loop to NBUCKET
+        buckets[i].head = NULL;
+        pthread_mutex_init(&buckets[i].lock, NULL);
+    }
+}
+
+void destroy(void) {
+    for (int i = 0; i < NBUCKET; i++) {  // Loop to NBUCKET
+        pthread_mutex_destroy(&buckets[i].lock);
+    }
+}
+```
+
+**What Changed:**
+- **ONE LINE:** `#define NBUCKET 10`
+- **All other code uses NBUCKET constant**
+- **No hardcoded 5 anywhere**
+- **10 locks automatically created**
+
+**Where to Add:**
+- File: `notxv6/ph-with-mutex-locks.c`
+- Line 1: Change `#define NBUCKET 5` → `#define NBUCKET 10`
+
+**Expected Performance:**
+```
+NBUCKET=5:  1.25x speedup (moderate contention)
+NBUCKET=10: 1.5x+ speedup (less contention per bucket)
+```
+
+---
+
+# 🎯 HIGHEST PROBABILITY QUESTIONS (BET ON THESE 5)
+
+## If you only have time to deep-study 5 topics:
+
+### 1️⃣ **Handshake - Multiple Bytes** (95% probability)
+- Most straightforward twist
+- Tests loop understanding
+- Same structure as original
+
+### 2️⃣ **Monitor - Print Before Syscall** (90% probability)
+- Minimal code change
+- Tests syscall() flow understanding
+- Easy to grade objectively
+
+### 3️⃣ **Sniffer - Variable Offset** (85% probability)
+- Tests if you hardcode offsets
+- Common mistake: assuming fixed location
+- Forces dynamic scanning
+
+### 4️⃣ **Hash Table - Global Lock First** (90% probability)
+- Progressive grading (Part 1: simple, Part 2: complex)
+- Matches quiz pattern (simple → extend)
+- Easy to test correctness
+
+### 5️⃣ **Uthread - Add Join** (80% probability)
+- Natural extension of thread lifecycle
+- Tests state management understanding
+- Doesn't require new assembly code
+
+---
+
+# 🔥 IF THEY TWIST X → DO Y (Quick Response Table)
+
+| Original | Likely Twist | Your Response |
+|----------|-------------|---------------|
+| **Handshake: 1 byte** | Send N bytes | Loop around read/write |
+| **Handshake: parent first** | Child first | Swap read/write order |
+| **Sniffer: fixed +16** | Variable offset | Search loop for printable |
+| **Sniffer: print 16 bytes** | Print until null | Add null check in loop |
+| **Monitor: after syscall** | Before syscall | Move printf 3 lines up |
+| **Monitor: one syscall** | Add second syscall | Repeat 9-file pattern |
+| **Uthread: no join** | Add join | Busy-wait on state==FREE |
+| **Uthread: all registers** | Missing s3 | Add sd/ld for s3 |
+| **Hash: per-bucket lock** | Global lock first | One pthread_mutex_t |
+| **Hash: NBUCKET=5** | NBUCKET=10 | Change #define only |
+
+---
+
+# 📋 ONE-PAGE CHEAT SHEET FOR EXAM
+
+## Pipes (Handshake):
+```c
+// Setup
+int p[2]; pipe(p);
+// Write
+write(p[1], buf, n);
+// Read
+read(p[0], buf, n);
+// Close unused ends
+close(p[READ/WRITE]);
+```
+
+## Memory (Sniffer):
+```c
+// Allocate
+char *p = sbrk(SIZE);
+// Scan
+for (i = 0; i < SIZE; i++)
+    if (p[i] == marker)
+        print_secret(p + i + offset);
+```
+
+## Syscall (Monitor):
+**9-File Pattern:**
+1. syscall.h - #define
+2. sysproc.c - implementation
+3. user.h - declaration
+4. usys.pl - entry()
+5. syscall.c - extern, array, names, printf
+6. proc.h - add field
+7. proc.c - init, fork copy
+8. user/*.c - program
+9. Makefile - UPROGS
+
+## Threading (Uthread):
+```c
+// Context
+struct { ra, sp, s0-s11 }
+// Switch (assembly)
+sd/ld all 14 registers
+// Schedule
+find RUNNABLE → switch → yield
+```
+
+## Locks (Hash Table):
+```c
+pthread_mutex_t lock;
+pthread_mutex_init(&lock, NULL);
+pthread_mutex_lock(&lock);
+// critical section
+pthread_mutex_unlock(&lock);
+```
+
+---
+
+**END OF REALISTIC EXAM VARIATIONS**

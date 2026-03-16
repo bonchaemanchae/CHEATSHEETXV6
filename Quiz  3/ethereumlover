@@ -1,0 +1,203 @@
+==================================================
+Q1 VARIATION 1: Different direct-slot count
+Condition twist:
+Teacher changes direct pointers to 10 instead of 11, still wants doubly-indirect.
+
+What changes conceptually:
+Old formula you memorized changes.
+NINDIRECT stays 256 (with BSIZE 1024).
+MAXFILE becomes 10 + 256 + 256*256 = 65802.
+
+Step-by-step:
+1) In [kernel/fs.h](kernel/fs.h), set NDIRECT to 10.
+2) Keep NDINDIRECT definition as NINDIRECT * NINDIRECT.
+3) Recompute MAXFILE using NDIRECT + NINDIRECT + NDINDIRECT.
+4) In [kernel/fs.h](kernel/fs.h), set dinode addrs size to NDIRECT + 2.
+5) In [kernel/file.h](kernel/file.h), set inode addrs size to NDIRECT + 2.
+6) In [kernel/fs.c](kernel/fs.c), do not hardcode index numbers.
+   Use NDIRECT for singly-indirect slot.
+   Use NDIRECT + 1 for doubly-indirect slot.
+7) Rebuild and run bigfile.
+8) If test expects a different final block count, verify expected count from new MAXFILE.
+
+Why this works:
+You wrote generic code indexed by constants, so changing NDIRECT should not break logic.
+This is exactly why hardcoding 11/12 is dangerous.
+
+Common trap:
+Forgetting to update both inode and dinode addrs size causes corruption.
+
+==================================================
+Q1 VARIATION 2: Different block size
+Condition twist:
+Teacher changes BSIZE from 1024 to 512.
+
+What changes conceptually:
+Pointers per indirect block halve:
+NINDIRECT = 512/4 = 128.
+NDINDIRECT = 128*128 = 16384.
+MAXFILE changes accordingly.
+
+Step-by-step:
+1) In [kernel/fs.h](kernel/fs.h), confirm NINDIRECT is macro-based:
+   NINDIRECT (BSIZE / sizeof(uint)).
+2) Keep NDINDIRECT formula macro-based:
+   NDINDIRECT (NINDIRECT * NINDIRECT).
+3) Keep MAXFILE formula macro-based:
+   NDIRECT + NINDIRECT + NDINDIRECT.
+4) In [kernel/fs.c](kernel/fs.c), ensure bmap uses NINDIRECT in:
+   first index i = bn / NINDIRECT
+   second index j = bn % NINDIRECT
+5) In [kernel/fs.c](kernel/fs.c), ensure itrunc loops NINDIRECT, not 256 literal.
+6) Rebuild from clean state so fs image is regenerated.
+7) Re-run tests and compare against new capacity expectation.
+
+Why this works:
+When formulas are symbolic (macro-driven), implementation auto-adapts to new block size.
+
+Common trap:
+Using literal 256 in any loop/index instantly fails this variation.
+
+==================================================
+Q1 VARIATION 3: Sparse-file correctness check
+Condition twist:
+Teacher adds a sparse-file test.
+Requirement: reads from holes should return zeros, and read path must not allocate blocks.
+
+What changes conceptually:
+Current xv6 read path calling bmap can accidentally allocate blocks.
+Need split mapping into:
+- lookup-only for read
+- allocate-on-demand for write
+
+Step-by-step:
+1) In [kernel/fs.c](kernel/fs.c), add helper bmap_lookup(ip, bn):
+   same navigation logic as bmap, but never calls balloc.
+   returns 0 if mapping missing.
+2) Keep existing bmap as allocate-on-demand for writes.
+3) In readi, replace bmap call with bmap_lookup.
+4) If bmap_lookup returns 0:
+   synthesize zeros for that chunk into destination buffer.
+5) In writei, keep using allocating bmap.
+6) Keep itrunc unchanged except it should naturally free only allocated blocks.
+7) Test:
+   create sparse region using lseek-style equivalent pattern (or custom user test),
+   read hole, verify bytes are zero,
+   verify disk blocks did not grow from reads.
+
+Why this works:
+Sparse semantics require non-allocating reads.
+Only writes should allocate physical blocks.
+
+Common trap:
+Using normal bmap in read path silently allocates and fails sparse test.
+
+==================================================
+Q2 VARIATION 1: Max symlink depth changed
+Condition twist:
+Depth guard changed from 10 to 5 (or 20).
+
+What changes conceptually:
+Only loop limit constant should change, logic same.
+
+Step-by-step:
+1) In [kernel/sysfile.c](kernel/sysfile.c), define a named constant:
+   SYMLOOP_MAX 5 (or value required).
+2) In sys_open symlink-follow loop, replace hardcoded depth check with constant.
+3) Keep cycle behavior:
+   if depth exceeds limit, fail with -1.
+4) Keep lock discipline:
+   read target, unlock-put current inode, namei next, ilock next.
+5) Test:
+   chain length less than limit should open successfully.
+   chain length greater than limit should fail.
+   cycle should fail quickly.
+
+Why this works:
+Depth guard is policy, not mechanism.
+Mechanism (follow link safely) remains same.
+
+Common trap:
+Off-by-one in depth check.
+Use consistent meaning: max number of link jumps allowed.
+
+==================================================
+Q2 VARIATION 2: Relative symlink targets
+Condition twist:
+Symlink target may be relative path, and must resolve relative to directory containing the symlink, not current working directory.
+
+What changes conceptually:
+Need path normalization when target does not start with slash.
+
+Step-by-step:
+1) In [kernel/sysfile.c](kernel/sysfile.c), when reading symlink target:
+   if target starts with slash, treat as absolute (existing behavior).
+2) If target is relative:
+   compute base directory of currently opened symlink path.
+3) Build combined path:
+   combined = dirname(current_link_path) + "/" + target.
+4) Normalize simple dot segments:
+   handle "." and ".." if required by test.
+5) Resolve combined path via namei.
+6) Continue loop for chained links.
+7) Keep depth guard and lock release sequence unchanged.
+8) Add tests:
+   /a/b/link -> "../x/file"
+   should resolve to /a/x/file.
+
+Why this works:
+Real symlink semantics are path-based and context-sensitive.
+Relative target must be interpreted from link location.
+
+Common trap:
+Resolving relative target from process cwd instead of symlink’s parent dir.
+
+==================================================
+Q2 VARIATION 3: O_NOFOLLOW applies only to final component
+Condition twist:
+Teacher checks POSIX-like behavior:
+Open should still follow intermediate symlinks in path, but not final one when nofollow is set.
+
+What changes conceptually:
+Current simplistic open(path) + namei(path) gives final inode directly.
+Need path-walk awareness of final component behavior.
+
+Step-by-step:
+1) In [kernel/sysfile.c](kernel/sysfile.c), parse path components manually (or via namex-style logic).
+2) For each component except final:
+   resolve symlinks normally.
+3) At final component:
+   if O_NOFOLLOW set and final inode is symlink, return symlink inode itself.
+   if O_NOFOLLOW not set, follow as normal.
+4) Keep depth guard for every symlink traversal.
+5) Keep correct locking at each hop.
+6) Directory write checks should apply to resolved inode according to mode.
+7) Test cases:
+   open("a/b/link", O_NOFOLLOW) where link is final => returns symlink inode.
+   open("linkdir/file", O_NOFOLLOW) where linkdir is intermediate => still follow linkdir.
+
+Why this works:
+This matches nuanced open semantics often used for security checks.
+
+Common trap:
+Applying nofollow to all components and breaking intermediate path resolution.
+
+==================================================
+FAST ADAPTATION STRATEGY FOR EXAM
+1) Convert every magic number into macro/constant.
+2) Keep all index math in terms of NDIRECT/NINDIRECT.
+3) Keep one strict lock pattern for symlink follow:
+   ilock -> read target -> iunlockput -> namei -> ilock.
+4) Separate policy from mechanism:
+   policy examples: depth limit value, nofollow behavior, relative path handling.
+   mechanism examples: inode traversal, block mapping, cleanup.
+5) Rebuild clean whenever layout constants change.
+
+==================================================
+MINI SELF-TEST BEFORE SUBMIT
+1) Does bmap allocate only when needed?
+2) Does itrunc free every level of indirect tree?
+3) Do inode and dinode addrs sizes match?
+4) Does symlink syscall store target string including terminator?
+5) Does open prevent infinite link loops?
+6) Do new flags/syscalls have non-conflicting values and full wiring?

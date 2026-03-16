@@ -1,0 +1,334 @@
+~~~text
+COPY EVERYTHING BELOW
+
+========================
+1) kernel/param.h
+========================
+Find:
+#define FSSIZE       2000  // size of file system in blocks
+
+Replace with:
+#define FSSIZE     200000  // size of file system in blocks
+
+
+========================
+2) kernel/fs.h
+========================
+Find:
+#define NDIRECT 12
+#define NINDIRECT (BSIZE / sizeof(uint))
+#define MAXFILE (NDIRECT + NINDIRECT)
+
+Replace with:
+#define NDIRECT 11
+#define NINDIRECT (BSIZE / sizeof(uint))
+#define NDINDIRECT (NINDIRECT * NINDIRECT)
+#define MAXFILE (NDIRECT + NINDIRECT + NDINDIRECT)
+
+Find in struct dinode:
+uint addrs[NDIRECT+1];   // Data block addresses
+
+Replace with:
+uint addrs[NDIRECT+2];   // Data block addresses
+
+
+========================
+3) kernel/file.h
+========================
+Find in struct inode:
+uint addrs[NDIRECT+1];
+
+Replace with:
+uint addrs[NDIRECT+2];
+
+
+========================
+4) kernel/fs.c
+========================
+Replace function bmap with this exact function:
+
+static uint
+bmap(struct inode *ip, uint bn)
+{
+  uint addr, *a;
+  struct buf *bp;
+
+  if(bn < NDIRECT){
+    if((addr = ip->addrs[bn]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[bn] = addr;
+    }
+    return addr;
+  }
+  bn -= NDIRECT;
+
+  if(bn < NINDIRECT){
+    // Load indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT] = addr;
+    }
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[bn] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
+
+  bn -= NINDIRECT;
+
+  if(bn < NDINDIRECT){
+    // Load doubly-indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT+1] = addr;
+    }
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    uint i = bn / NINDIRECT;
+    if((addr = a[i]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0){
+        brelse(bp);
+        return 0;
+      }
+      a[i] = addr;
+      log_write(bp);
+    }
+    brelse(bp);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    uint j = bn % NINDIRECT;
+    if((addr = a[j]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[j] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
+
+  panic("bmap: out of range");
+}
+
+Replace function itrunc with this exact function:
+
+void
+itrunc(struct inode *ip)
+{
+  int i, j;
+  struct buf *bp, *bp2;
+  uint *a, *a2;
+
+  for(i = 0; i < NDIRECT; i++){
+    if(ip->addrs[i]){
+      bfree(ip->dev, ip->addrs[i]);
+      ip->addrs[i] = 0;
+    }
+  }
+
+  if(ip->addrs[NDIRECT]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j])
+        bfree(ip->dev, a[j]);
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT]);
+    ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(i = 0; i < NINDIRECT; i++){
+      if(a[i]){
+        bp2 = bread(ip->dev, a[i]);
+        a2 = (uint*)bp2->data;
+        for(j = 0; j < NINDIRECT; j++){
+          if(a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
+  }
+
+  ip->size = 0;
+  iupdate(ip);
+}
+
+
+========================
+5) kernel/stat.h
+========================
+Add:
+#define T_SYMLINK 4   // Symbolic link
+
+So section becomes:
+#define T_DIR     1   // Directory
+#define T_FILE    2   // File
+#define T_DEVICE  3   // Device
+#define T_SYMLINK 4   // Symbolic link
+
+
+========================
+6) kernel/fcntl.h
+========================
+Add:
+#define O_NOFOLLOW 0x800
+
+So section becomes:
+#define O_RDONLY  0x000
+#define O_WRONLY  0x001
+#define O_RDWR    0x002
+#define O_CREATE  0x200
+#define O_TRUNC   0x400
+#define O_NOFOLLOW 0x800
+
+
+========================
+7) kernel/syscall.h
+========================
+Add:
+#define SYS_symlink 22
+
+
+========================
+8) kernel/syscall.c
+========================
+Add extern:
+extern uint64 sys_symlink(void);
+
+Add in syscalls[]:
+[SYS_symlink] sys_symlink,
+
+
+========================
+9) user/user.h
+========================
+Add prototype:
+int symlink(const char*, const char*);
+
+
+========================
+10) user/usys.pl
+========================
+Add line:
+entry("symlink");
+
+
+========================
+11) kernel/sysfile.c
+========================
+Add this whole function above sys_open:
+
+uint64
+sys_symlink(void)
+{
+  struct inode *ip;
+  char target[MAXPATH], path[MAXPATH];
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0){
+    end_op();
+    return -1;
+  }
+
+  if(writei(ip, 0, (uint64)target, 0, strlen(target) + 1) != strlen(target) + 1){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+
+  iunlockput(ip);
+  end_op();
+  return 0;
+}
+
+In sys_open, change:
+int n;
+to:
+int n, depth;
+
+In sys_open, after ilock(ip); insert this exact block:
+
+    depth = 0;
+    while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+      if(depth++ >= 10){
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+
+      if(readi(ip, 0, (uint64)path, 0, MAXPATH) <= 0){
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+
+      iunlockput(ip);
+      if((ip = namei(path)) == 0){
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+    }
+
+
+========================
+12) Makefile
+========================
+In main UPROGS list ensure these exist:
+	$U/_bigfile\
+	$U/_symlinktest\
+
+In fs lab block make sure it is:
+ifeq ($(LAB),fs)
+UPROGS += \
+	$U/_bigfile \
+	$U/_symlinktest
+endif
+
+
+========================
+13) Test commands
+========================
+make clean && make qemu
+# inside xv6 shell:
+bigfile
+symlinktest
+
+# exit xv6, then:
+./grade-lab-fs bigfile
+./grade-lab-fs symlink
+make clean && make grade
+make zipball
+
+END COPY
+~~~
+

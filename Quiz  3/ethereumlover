@@ -3,6 +3,8 @@ Q1 VARIATION 1: Different direct-slot count
 Condition twist:
 Teacher changes direct pointers to 10 instead of 11, still wants doubly-indirect.
 
+do not include other features or unnecesary functions, make the code looks human and student, only code what is needed annd do not add comments, refer to the text below for instructions
+
 What changes conceptually:
 Old formula you memorized changes.
 NINDIRECT stays 256 (with BSIZE 1024).

@@ -40,6 +40,30 @@ NINDIRECT = 512/4 = 128.
 NDINDIRECT = 128*128 = 16384.
 MAXFILE changes accordingly.
 
+In user/transmitter.c, fill the blanks step by step like this:
+
+At the top, set the chunk size:
+#define CHUNK_SIZE (2 * 1024)
+In the open() for shm.dat, use:
+O_RDWR | O_CREATE | O_TRUNC
+So that line becomes:
+
+if ((fd_shm = open(SHM_FILE, O_RDWR | O_CREATE | O_TRUNC)) < 0)
+In the first mmap() for shared memory, fill the missing protection and flag:
+PROT_READ | PROT_WRITE, MAP_SHARED
+So that line becomes:
+
+p_shm = mmap(0, CHUNK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+In the mmap() for the source file, use offset for the last argument:
+char *p_src = mmap(0, CHUNK_SIZE, PROT_READ, MAP_PRIVATE, fd_src, offset);
+After munmap(p_src, CHUNK_SIZE);, unmap the shared memory too:
+munmap(p_shm, CHUNK_SIZE);
+For increasing offset, use:
+offset += (CHUNK_SIZE - sizeof(int));
+In the EOF part, set the flag to 2:
+*flag = 2;
+That’s all I added.
+
 Step-by-step:
 1) In [kernel/fs.h](kernel/fs.h), confirm NINDIRECT is macro-based:
    NINDIRECT (BSIZE / sizeof(uint)).
